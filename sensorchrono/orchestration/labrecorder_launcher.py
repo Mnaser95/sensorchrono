@@ -52,7 +52,7 @@ def bundled_labrecorder_dir() -> Path | None:
 
 
 def render_config(out_dir: Path | str, *, port: int = DEFAULT_RCS_PORT) -> str:
-    """LabRecorder ``Config.cfg`` text: enable the RCS on ``port`` and point
+    """Content for ``LabRecorder.cfg``: enable the RCS on ``port`` and point
     ``StudyRoot`` at this session's output folder.
 
     Keys verified against App-LabRecorder's ``LabRecorder.cfg`` (a flat INI —
@@ -129,9 +129,12 @@ class LabRecorderLauncher:
         dest = base / "LabRecorder"
         shutil.copytree(self.source_dir, dest, dirs_exist_ok=True)
         self._workdir = base
-        config = dest / "Config.cfg"
+        # Must be named "LabRecorder.cfg" — that is the filename App-LabRecorder
+        # auto-loads from its own directory on startup. Writing it here overwrites
+        # any bundled copy so our StudyRoot and RCSPort take effect.
+        config = dest / "LabRecorder.cfg"
         config.write_text(render_config(out_dir, port=self.port), encoding="utf-8")
-        self._proc = subprocess.Popen([str(dest / _LABRECORDER_EXE), str(config)], cwd=str(dest))
+        self._proc = subprocess.Popen([str(dest / _LABRECORDER_EXE)], cwd=str(dest))
         return wait_for_rcs(self.host, self.port, deadline_s=deadline_s, proc=self._proc)
 
     def stop(self) -> None:

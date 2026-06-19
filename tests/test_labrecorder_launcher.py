@@ -1,4 +1,4 @@
-"""LabRecorder launcher: bundle discovery, RCS poll, Config.cfg render, and a
+"""LabRecorder launcher: bundle discovery, RCS poll, LabRecorder.cfg render, and a
 launch/stop lifecycle that never depends on a real LabRecorder.exe."""
 from __future__ import annotations
 
@@ -92,6 +92,44 @@ def test_launch_returns_false_without_exe(tmp_path):
     lr = LabRecorderLauncher(tmp_path, port=1)
     assert lr.launch(tmp_path / "out") is False
     lr.stop()
+
+
+def test_launch_writes_labrecorder_cfg_not_config_cfg(tmp_path):
+    """The config MUST land in LabRecorder.cfg — that is the filename App-LabRecorder
+    auto-loads from its own directory. Config.cfg is silently ignored."""
+    import sys
+    import subprocess
+
+    src = tmp_path / "LRsrc"
+    src.mkdir()
+    stub_exe = src / "LabRecorder.exe"
+    stub_exe.write_bytes(b"stub")
+
+    work = tmp_path / "work"
+    work.mkdir()
+
+    lr = LabRecorderLauncher(src, port=1)
+    # Patch Popen so we don't actually run the stub exe; capture what would be written.
+    launched_argv = []
+
+    class _FakeProc:
+        def poll(self): return 1  # immediately "exited"
+
+    original_popen = subprocess.Popen
+
+    def fake_popen(argv, **kw):
+        launched_argv.extend(argv)
+        return _FakeProc()
+
+    import unittest.mock as mock
+    with mock.patch("subprocess.Popen", side_effect=fake_popen):
+        lr.launch(tmp_path / "out", work_dir=work)
+
+    dest = work / "LabRecorder"
+    assert (dest / "LabRecorder.cfg").exists(), "config must be LabRecorder.cfg"
+    assert not (dest / "Config.cfg").exists(), "Config.cfg must NOT be written"
+    # exe should be launched without a config path arg
+    assert len(launched_argv) == 1
 
 
 def test_stop_is_idempotent(tmp_path):
