@@ -77,6 +77,10 @@ class BridgeAdapter(DeviceAdapter):
             return [self._python, "--run-bridge", self._bridge_module, *args]
         return [self._python, "-m", self._bridge_module, *args]
 
+    def _stop_file(self, session) -> "Path | None":
+        """Subclasses override to provide a stop-file path for clean teardown."""
+        return None
+
     def launch(self, session) -> None:
         # cwd=None: the bridge is resolved by module name (dev ``-m`` finds the
         # package from the repo-root cwd the app inherits; frozen ``--run-bridge``
@@ -84,7 +88,8 @@ class BridgeAdapter(DeviceAdapter):
         # log_dir lives next to the recording it explains (<out_dir>/logs) so the
         # full per-bridge ACK/TIMEOUT sequence survives the session for triage.
         log_dir = Path(session.out_dir) / "logs"
-        spec = BridgeSpec(self.name, self.build_argv(session), self._ready_pattern(), cwd=None, log_dir=log_dir)
+        spec = BridgeSpec(self.name, self.build_argv(session), self._ready_pattern(),
+                          cwd=None, log_dir=log_dir, stop_file=self._stop_file(session))
         self._proc = BridgeProcess(spec)
         self._proc.start()
 

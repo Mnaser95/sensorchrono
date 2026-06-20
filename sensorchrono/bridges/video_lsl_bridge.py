@@ -138,6 +138,9 @@ def main(argv=None):
                              "so the app can show a live camera preview while capturing.")
     parser.add_argument("--preview-fps", type=float, default=2.0,
                         help="JPEG snapshots/sec written to --preview-path (default 2).")
+    parser.add_argument("--stop-file", default=None,
+                        help="Path polled every 10 frames; when it appears the bridge "
+                             "exits cleanly so writer.release() finalizes the MP4.")
     args = parser.parse_args(argv)
 
     out_dir = Path(args.out_dir)
@@ -168,6 +171,8 @@ def main(argv=None):
     print("[video] warming up...")
     for _ in range(10):
         cap.read()
+
+    stop_file = Path(args.stop_file) if args.stop_file else None
 
     t_start = pylsl.local_clock()
     t_end = t_start + args.duration if args.duration > 0 else None
@@ -219,6 +224,10 @@ def main(argv=None):
             if t_end is not None and t_read >= t_end:
                 print(f"[video] duration {args.duration}s reached.")
                 break
+
+            if stop_file is not None and frame_idx % 10 == 0 and stop_file.exists():
+                print("[video] stop file detected, shutting down cleanly.")
+                break
     except KeyboardInterrupt:
         print("\n[video] Ctrl+C received.")
     finally:
@@ -230,6 +239,11 @@ def main(argv=None):
         csv_f.close()
         if args.preview:
             cv2.destroyAllWindows()
+        if stop_file is not None:
+            try:
+                stop_file.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

@@ -46,6 +46,9 @@ class BridgeSpec:
     #: ``<log_dir>/bridge_<name>.log`` — a session-scoped record that outlives the
     #: process and the 200-line ring buffer, so a field failure stays debuggable.
     log_dir: Path | None = None
+    #: when set, stop() writes this file so the bridge can detect it and exit
+    #: cleanly through its finally block before we resort to terminate().
+    stop_file: Path | None = None
 
 
 class BridgeProcess:
@@ -140,20 +143,36 @@ class BridgeProcess:
             time.sleep(0.02)
 
     def stop(self, term_grace_s: float = 5.0) -> None:
-        """Graceful teardown: terminate (SIGTERM), wait, then kill (SIGKILL)."""
+        """Graceful teardown: stop-file signal → wait → terminate → kill."""
         proc = self._proc
         if proc is None:
             return
         if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=term_grace_s)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            # Phase 1: write the stop file so the bridge can exit cleanly through
+            # its finally block (e.g. VideoWriter.release() to finalize the MP4
+            # moov atom). On Windows, proc.terminate() is TerminateProcess() and
+            # never runs the bridge's Python finally blocks.
+            if self.spec.stop_file is not None:
+                try:
+                    self.spec.stop_file.write_text("")
+                except Exception:
+                    pass
                 try:
                     proc.wait(timeout=term_grace_s)
-                except subprocess.TimeoutExpired:  # pragma: no cover - extreme
-                    pass
+                except subprocess.TimeoutExpired:
+                    pass  # fall through to terminate
+
+            # Phase 2: hard terminate if still alive
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=term_grace_s)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=term_grace_s)
+                    except subprocess.TimeoutExpired:  # pragma: no cover - extreme
+                        pass
         if self._reader is not None:
             self._reader.join(timeout=2.0)
             self._reader = None

@@ -17,11 +17,15 @@ class CameraAdapter(BridgeAdapter):
     def streams(self) -> list[StreamDef]:
         return [StreamDef.from_contract(StreamName.VIDEO_FRAMES)]
 
+    def _stop_file(self, session) -> Path:
+        return Path(session.out_dir) / f"{session_tag(session)}_video.stop"
+
     def _bridge_args(self, session) -> list[str]:
         args = [
             "--duration", f"{self._duration(session):.0f}",
             "--out-dir", str(session.out_dir),
             "--tag", session_tag(session),
+            "--stop-file", str(self._stop_file(session)),
             # Live preview for the staging page: the GUI can't open the camera
             # (this bridge holds it), so the bridge drops a small JPEG here ~2x/s.
             "--preview-path", str(self.preview_path(session)),
