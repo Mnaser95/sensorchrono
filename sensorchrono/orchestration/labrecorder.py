@@ -32,19 +32,20 @@ class RecorderError(RuntimeError):
 
 
 def build_filename_command(session, *, run: int = 1) -> str:
-    """LabRecorder RCS filename command (no trailing newline).
+    """LabRecorder RCS filename template from a session (no trailing newline).
 
-    Uses ``{template:}`` so LabRecorder places the XDF directly in StudyRoot
-    (which is already set to ``session.out_dir``) with no subdirectories —
-    e.g. ``sensorchrono_out/p01_s1_rest.xdf`` — matching the flat layout of
-    the other per-modality files (audio.wav, video.mp4, frames.csv).
-
-    Yields e.g. ``filename {template:p01_s1_rest}`` or
-    ``filename {template:p01_s1_rest_R2}`` for run > 1."""
-    name = f"{session.participant}_{session.session}_{session.task}"
-    if run > 1:
-        name += f"_R{run}"
-    return f"filename {{template:{name}}}"
+    Yields e.g. ``filename {root:sensorchrono}{task:rest}{participant:p01}
+    {session:s1}{run:1}``.  LabRecorder saves the XDF under StudyRoot in a
+    nested subfolder (root/participant/session/); _recorded_xdf() uses rglob
+    so it finds the file regardless of depth."""
+    return (
+        "filename "
+        f"{{root:{session.root_label}}}"
+        f"{{task:{session.task}}}"
+        f"{{participant:{session.participant}}}"
+        f"{{session:{session.session}}}"
+        f"{{run:{run}}}"
+    )
 
 
 class Recorder(ABC):
