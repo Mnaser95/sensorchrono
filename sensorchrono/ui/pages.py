@@ -179,7 +179,7 @@ class _MultiDeviceList(QtWidgets.QGroupBox):
 
         add_btn = QtWidgets.QPushButton("+ Add")
         add_btn.setProperty("role", "secondary")
-        add_btn.setFixedWidth(70)
+        add_btn.setMinimumWidth(90)
         add_btn.clicked.connect(self.add_row)
 
         hdr = QtWidgets.QHBoxLayout()
@@ -249,14 +249,23 @@ class SetupPage(QtWidgets.QWidget):
         self.duration.setSuffix(" s")
         self.dry_run = QtWidgets.QCheckBox("dry run (synthetic streams, no hardware)")
         self.dry_run.toggled.connect(self._on_dry_run_toggled)
-        self.out_dir = QtWidgets.QLabel()
-        self.out_dir.setStyleSheet("color:#888;")
+
+        self.out_dir = QtWidgets.QLineEdit()
+        self.out_dir.setPlaceholderText("Choose output folder…")
+        browse_btn = QtWidgets.QPushButton("Browse…")
+        browse_btn.setProperty("role", "secondary")
+        browse_btn.setMinimumWidth(90)
+        browse_btn.clicked.connect(self._browse_out_dir)
+        out_dir_row = QtWidgets.QHBoxLayout()
+        out_dir_row.addWidget(self.out_dir, 1)
+        out_dir_row.addWidget(browse_btn)
+
         form.addRow("Participant", self.participant)
         form.addRow("Session", self.session_id)
         form.addRow("Task", self.task)
         form.addRow("Duration", self.duration)
         form.addRow("", self.dry_run)
-        form.addRow("Output dir", self.out_dir)
+        form.addRow("Output dir", out_dir_row)
 
         # ── Available device lists (populated by scan) ────────────────────
         self._avail_ports: list[str] = ["COM3", "COM4", "COM5", "COM6"]
@@ -457,6 +466,13 @@ class SetupPage(QtWidgets.QWidget):
             display_grid=display_grid,
         )
 
+    def _browse_out_dir(self) -> None:
+        current = self.out_dir.text().strip() or str(Path.home())
+        chosen = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Choose output folder", current)
+        if chosen:
+            self.out_dir.setText(chosen)
+
     def _on_dry_run_toggled(self, checked: bool) -> None:
         self._hw_group.setEnabled(not checked)
 
@@ -507,6 +523,9 @@ class SetupPage(QtWidgets.QWidget):
         session.task = self.task.text().strip()
         session.duration_s = int(self.duration.value())
         session.dry_run = self.dry_run.isChecked()
+        out = self.out_dir.text().strip()
+        if out:
+            session.out_dir = Path(out)
         session.bindings = self._bindings_from_fields()
 
     def show_error(self, message: str) -> None:
