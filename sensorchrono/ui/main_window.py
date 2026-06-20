@@ -16,6 +16,8 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtWidgets
 
+import functools
+
 from sensorchrono.config import ConfigError, SessionConfig, default_dry_run, user_config_path
 from sensorchrono.contract import StreamName
 from sensorchrono.orchestration.lsl_monitor import LslMonitor
@@ -201,10 +203,15 @@ class MainWindow(QtWidgets.QMainWindow):
             fleet = default_real_fleet()
         expected = [s.name for a in fleet for s in a.streams()]
         self._monitor = LslMonitor(expected)
-        recorder, launcher = self._make_recorder(session)
+        recorder, launcher, rcs_port = self._make_recorder(session)
+        # Tell preflight to check the same port the bundled LabRecorder actually
+        # uses, so it shows green instead of a misleading "RCS not reachable" warning.
+        from sensorchrono.orchestration import preflight as _pf
+        preflight_fn = functools.partial(_pf.check_all, rcs_port=rcs_port)
         self.controller = SessionController(
             session, adapters=fleet, monitor=self._monitor,
             recorder=recorder, labrecorder_launcher=launcher,
+            preflight_fn=preflight_fn,
         )
         c = self.controller
         c.state_changed.connect(self._on_state)
@@ -226,8 +233,9 @@ class MainWindow(QtWidgets.QMainWindow):
         app would hijack the operator's LabRecorder, which has a different
         StudyRoot, and the XDF would land in the wrong folder."""
         if session.dry_run:
-            return None, None
-        from sensorchrono.orchestration.labrecorder import make_recorder
+            from sensorchrono.orchestration.labrecorder import DEFAULT_RCS_PORT
+            return None, None, DEFAULT_RCS_PORT
+        from sensorchrono.orchestration.labrecorder import DEFAULT_RCS_PORT, make_recorder
         from sensorchrono.orchestration.labrecorder_launcher import (
             LabRecorderLauncher,
             bundled_labrecorder_dir,
@@ -252,15 +260,16 @@ class MainWindow(QtWidgets.QMainWindow):
         def confirm(msg):
             return QtWidgets.QMessageBox.question(self, "LabRecorder", msg) == QtWidgets.QMessageBox.StandardButton.Yes
 
+        rcs_port = _BUNDLED_PORT if lr_dir is not None else DEFAULT_RCS_PORT
         try:
             recorder = make_recorder(
-                rcs_port=_BUNDLED_PORT,
+                rcs_port=rcs_port,
                 manual_prompt=prompt,
                 manual_confirm=confirm,
             )
         except Exception:
             recorder = None
-        return recorder, launcher
+        return recorder, launcher, rcs_port
 
     # -- transitions (page actions) ----------------------------------------
     def _start_session(self) -> None:
