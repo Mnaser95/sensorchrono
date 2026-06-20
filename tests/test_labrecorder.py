@@ -80,7 +80,7 @@ def test_rcs_start_stop_sends_full_protocol():
         cmds = srv.received
         for expected in ("update", "select all", "start", "stop"):
             assert expected in cmds, f"missing {expected}: {cmds}"
-        assert any(c.startswith("filename {root:sensorchrono}") for c in cmds)
+        assert any(c.startswith("filename {template:") for c in cmds)
         # 'select all' guarantees no stream can be under-selected
         assert cmds.index("select all") < cmds.index("start")
     finally:
