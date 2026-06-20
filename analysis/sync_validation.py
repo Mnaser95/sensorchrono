@@ -148,7 +148,7 @@ def generate_validation_video(
     fidx_min = int(cal_fidxs[0])
     fidx_max = int(cal_fidxs[-1])
 
-    # --- ECG ---
+    # --- ECG (1 Hz HPF to remove baseline wander / drift) ---
     ecg_times: np.ndarray | None = None
     ecg_vals: np.ndarray | None = None
     if "ShimmerECG" in by_name:
@@ -159,6 +159,14 @@ def generate_validation_video(
         ts = ts - (lag / 1000.0 if lag else 0.0)
         raw = np.asarray(ecg["time_series"])
         lead1 = raw[:, 1] if raw.ndim == 2 and raw.shape[1] > 1 else raw[:, 0]
+        lead1 = lead1.astype(float)
+        try:
+            from scipy.signal import butter, filtfilt
+            ecg_fs = 1.0 / float(np.median(np.diff(ts)))
+            b, a_hp = butter(2, 1.0 / (ecg_fs / 2.0), btype="high")
+            lead1 = filtfilt(b, a_hp, lead1)
+        except Exception as exc:
+            print(f"[sync_validation] ECG HPF failed: {exc}", file=sys.stderr)
         ecg_times = ts
         ecg_vals = lead1.astype(np.float32)
 
@@ -198,7 +206,7 @@ def generate_validation_video(
     frame_h = int(out_w * src_h / src_w)
     if frame_h % 2 != 0:
         frame_h -= 1
-    total_h = frame_h + _STRIP_H * 2
+    total_h = frame_h + _STRIP_H * 2  # video / audio / ECG stacked vertically
 
     out_path = out_dir / "sync_validation.mp4"
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -219,27 +227,27 @@ def generate_validation_video(
 
             cam = cv2.resize(frame, (out_w, frame_h))
 
-            if ecg_times is not None and ecg_vals is not None:
-                ecg_strip = _render_strip(
-                    ecg_times, ecg_vals, t_now, _WINDOW_S,
-                    press_ts, out_w, _STRIP_H, (255, 140, 60), "ECG lead1")
-            else:
-                ecg_strip = np.full((_STRIP_H, out_w, 3), (20, 20, 20), dtype=np.uint8)
-                cv2.putText(ecg_strip, "ECG not available",
-                            (out_w // 2 - 80, _STRIP_H // 2),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
-
             if audio_times is not None and audio_env is not None:
                 aud_strip = _render_strip(
                     audio_times, audio_env, t_now, _WINDOW_S,
-                    press_ts, out_w, _STRIP_H, (60, 200, 80), "Audio envelope (1–6 kHz)")
+                    press_ts, out_w, _STRIP_H, (255, 144, 30), "Audio envelope (1–6 kHz)")
             else:
                 aud_strip = np.full((_STRIP_H, out_w, 3), (20, 20, 20), dtype=np.uint8)
                 cv2.putText(aud_strip, "Audio not available",
                             (out_w // 2 - 80, _STRIP_H // 2),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
 
-            composite = np.vstack([cam, ecg_strip, aud_strip])
+            if ecg_times is not None and ecg_vals is not None:
+                ecg_strip = _render_strip(
+                    ecg_times, ecg_vals, t_now, _WINDOW_S,
+                    press_ts, out_w, _STRIP_H, (255, 140, 60), "ECG lead1 (1 Hz HPF)")
+            else:
+                ecg_strip = np.full((_STRIP_H, out_w, 3), (20, 20, 20), dtype=np.uint8)
+                cv2.putText(ecg_strip, "ECG not available",
+                            (out_w // 2 - 80, _STRIP_H // 2),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+
+            composite = np.vstack([cam, aud_strip, ecg_strip])
 
             # Red border flash on keyboard press
             if any(0.0 <= (t_now - tp) <= _FLASH_DUR_S for tp in press_ts):
