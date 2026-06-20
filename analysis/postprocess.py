@@ -219,6 +219,30 @@ def run(xdf_path: Path, *,
             detail=f"could not certify residuals: {exc}",
         ))
 
+    # --- Stage 6: sync validation video
+    try:
+        from analysis.sync_validation import generate_validation_video as _gen_video
+        vid_path = _gen_video(by_name, ecg_corrected_ts, lag_ms, out_dir)
+        if vid_path:
+            stages.append(StageResult(
+                name="6_sync_validation",
+                status="ok",
+                detail=f"wrote {vid_path.name}",
+                artifacts=[str(vid_path)],
+            ))
+        else:
+            stages.append(StageResult(
+                name="6_sync_validation",
+                status="skipped",
+                detail="no KeyboardFiducial stream, video file, or frames.csv",
+            ))
+    except Exception as exc:
+        stages.append(StageResult(
+            name="6_sync_validation",
+            status="warn",
+            detail=f"sync validation video failed: {exc}",
+        ))
+
     # Overall
     statuses = [s.status for s in stages]
     if "error" in statuses:

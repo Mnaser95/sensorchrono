@@ -26,9 +26,8 @@ def _session():
 
 
 def test_filename_command_template():
-    assert build_filename_command(_session(), run=2) == (
-        "filename {root:sensorchrono}{task:rest}{participant:p01}{session:s1}{run:2}"
-    )
+    assert build_filename_command(_session()) == "filename {template:p01_s1_rest.xdf}"
+    assert build_filename_command(_session(), run=2) == "filename {template:p01_s1_rest_R2.xdf}"
 
 
 class _FakeRcsServer:
@@ -79,7 +78,7 @@ def test_rcs_start_stop_sends_full_protocol():
         cmds = srv.received
         for expected in ("update", "select all", "start", "stop"):
             assert expected in cmds, f"missing {expected}: {cmds}"
-        assert any(c.startswith("filename {root:sensorchrono}") for c in cmds)
+        assert any(c.startswith("filename {template:") for c in cmds)
         # 'select all' guarantees no stream can be under-selected
         assert cmds.index("select all") < cmds.index("start")
     finally:
