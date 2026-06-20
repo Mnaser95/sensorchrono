@@ -218,7 +218,13 @@ class MainWindow(QtWidgets.QMainWindow):
         bundled LabRecorder so its RCS is reachable *before* make_recorder picks
         a backend (RCS auto-wins). If no bundle / RCS never comes up, make_recorder
         falls back to the manual recorder — the launcher is still returned so the
-        FSM tears it down. Dry-run takes neither."""
+        FSM tears it down. Dry-run takes neither.
+
+        We use a dedicated port (22346) for the bundled instance so it never
+        collides with a standalone LabRecorder the operator may already have open
+        on the standard port 22345 (e.g. for EEG recordings). Without this the
+        app would hijack the operator's LabRecorder, which has a different
+        StudyRoot, and the XDF would land in the wrong folder."""
         if session.dry_run:
             return None, None
         from sensorchrono.orchestration.labrecorder import make_recorder
@@ -227,10 +233,14 @@ class MainWindow(QtWidgets.QMainWindow):
             bundled_labrecorder_dir,
         )
 
+        # Port 22346 is reserved for the bundled instance so it never conflicts
+        # with the operator's own LabRecorder on the standard port 22345.
+        _BUNDLED_PORT = 22346
+
         launcher = None
         lr_dir = bundled_labrecorder_dir()
         if lr_dir is not None:
-            launcher = LabRecorderLauncher(lr_dir)
+            launcher = LabRecorderLauncher(lr_dir, port=_BUNDLED_PORT)
             try:
                 launcher.launch(session.out_dir)
             except Exception:
@@ -243,7 +253,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return QtWidgets.QMessageBox.question(self, "LabRecorder", msg) == QtWidgets.QMessageBox.StandardButton.Yes
 
         try:
-            recorder = make_recorder(manual_prompt=prompt, manual_confirm=confirm)
+            recorder = make_recorder(
+                rcs_port=_BUNDLED_PORT,
+                manual_prompt=prompt,
+                manual_confirm=confirm,
+            )
         except Exception:
             recorder = None
         return recorder, launcher
