@@ -96,40 +96,38 @@ def test_launch_returns_false_without_exe(tmp_path):
 
 def test_launch_writes_labrecorder_cfg_not_config_cfg(tmp_path):
     """The config MUST land in LabRecorder.cfg — that is the filename App-LabRecorder
-    auto-loads from its own directory. Config.cfg is silently ignored."""
-    import sys
+    auto-loads from its own directory. Config.cfg is silently ignored.
+
+    When source_dir is writable (the common case after Inno Setup installs to a
+    per-user directory), the launcher runs LabRecorder in-place rather than copying
+    it to a temp folder, which avoids Windows Defender flagging a new exe in %TEMP%.
+    """
     import subprocess
+    import unittest.mock as mock
 
     src = tmp_path / "LRsrc"
     src.mkdir()
-    stub_exe = src / "LabRecorder.exe"
-    stub_exe.write_bytes(b"stub")
+    (src / "LabRecorder.exe").write_bytes(b"stub")
 
-    work = tmp_path / "work"
-    work.mkdir()
-
-    lr = LabRecorderLauncher(src, port=1)
-    # Patch Popen so we don't actually run the stub exe; capture what would be written.
     launched_argv = []
 
     class _FakeProc:
         def poll(self): return 1  # immediately "exited"
 
-    original_popen = subprocess.Popen
-
     def fake_popen(argv, **kw):
         launched_argv.extend(argv)
         return _FakeProc()
 
-    import unittest.mock as mock
+    lr = LabRecorderLauncher(src, port=1)
     with mock.patch("subprocess.Popen", side_effect=fake_popen):
-        lr.launch(tmp_path / "out", work_dir=work)
+        lr.launch(tmp_path / "out")
 
-    dest = work / "LabRecorder"
-    assert (dest / "LabRecorder.cfg").exists(), "config must be LabRecorder.cfg"
-    assert not (dest / "Config.cfg").exists(), "Config.cfg must NOT be written"
-    # exe should be launched without a config path arg
+    # In-place mode: config is written directly into source_dir (no temp copy).
+    assert (src / "LabRecorder.cfg").exists(), "config must be LabRecorder.cfg"
+    assert not (src / "Config.cfg").exists(), "Config.cfg must NOT be written"
+    # Exe is launched from source_dir with no extra config path argument.
     assert len(launched_argv) == 1
+    assert launched_argv[0] == str(src / "LabRecorder.exe")
 
 
 def test_stop_is_idempotent(tmp_path):

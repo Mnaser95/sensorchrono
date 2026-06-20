@@ -286,14 +286,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for st in _PAGE_ORDER:
             self.stack.addWidget(self._pages[st])
 
-        # Wrap header + stack in one container so the black banner spans the window
-        container = QtWidgets.QWidget()
-        vbox = QtWidgets.QVBoxLayout(container)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
-        vbox.addWidget(_BrandHeader())
-        vbox.addWidget(self.stack)
-        self.setCentralWidget(container)
+        self.setCentralWidget(self.stack)
         self.statusBar().showMessage("ready")
 
         # splash → setup
@@ -613,6 +606,7 @@ def run(argv: list[str] | None = None) -> int:
     import sys
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv if argv is None else argv)
+    app.setStyle("Fusion")   # cross-platform renderer — required for QSS color on QSpinBox text on Windows
     app.setStyleSheet(APP_STYLESHEET)
     session = _load_or_default_session()
     win = MainWindow(session)

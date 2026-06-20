@@ -48,6 +48,21 @@ _FAIL = "✗"
 _MIC_DEFAULT = "(system default)"
 
 
+class _NoScrollComboBox(QtWidgets.QComboBox):
+    """QComboBox that ignores wheel events — selection must be made by clicking."""
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        event.ignore()
+
+
+class _NoScrollSpinBox(QtWidgets.QSpinBox):
+    """QSpinBox that ignores wheel events unless the widget has keyboard focus."""
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
 def _heading(step: str, subtitle: str) -> QtWidgets.QLabel:
     """Styled page heading: gold step title + muted white subtitle."""
     lbl = QtWidgets.QLabel(
@@ -151,7 +166,7 @@ class _DeviceRow(QtWidgets.QWidget):
 
     def __init__(self, options: list[str], editable: bool = True, parent=None) -> None:
         super().__init__(parent)
-        self.combo = QtWidgets.QComboBox()
+        self.combo = _NoScrollComboBox()
         self.combo.setEditable(editable)
         self.combo.addItems(options)
         rm = QtWidgets.QPushButton("✕")
@@ -244,7 +259,7 @@ class SetupPage(QtWidgets.QWidget):
         self.participant = QtWidgets.QLineEdit()
         self.session_id = QtWidgets.QLineEdit()
         self.task = QtWidgets.QLineEdit()
-        self.duration = QtWidgets.QSpinBox()
+        self.duration = _NoScrollSpinBox()
         self.duration.setRange(5, 14400)
         self.duration.setSuffix(" s")
         self.dry_run = QtWidgets.QCheckBox("dry run (synthetic streams, no hardware)")
@@ -273,7 +288,7 @@ class SetupPage(QtWidgets.QWidget):
         self._avail_mics: list[str] = [_MIC_DEFAULT]
 
         self._shimmer_list = _MultiDeviceList(
-            "Shimmer devices  (ECG/EMG)",
+            "Physiological sensors",
             lambda: self._avail_ports, editable=True)
         self._camera_list = _MultiDeviceList(
             "Cameras  (UVC webcams)",
@@ -343,19 +358,19 @@ class SetupPage(QtWidgets.QWidget):
         vbox = QtWidgets.QVBoxLayout(grp)
 
         size_row = QtWidgets.QHBoxLayout()
-        size_row.addWidget(QtWidgets.QLabel("Grid:"))
-        self._grid_rows = QtWidgets.QSpinBox()
+        self._grid_rows = _NoScrollSpinBox()
         self._grid_rows.setRange(1, 4)
         self._grid_rows.setValue(2)
-        self._grid_rows.setFixedWidth(50)
-        self._grid_cols = QtWidgets.QSpinBox()
+        self._grid_rows.setFixedWidth(70)
+        self._grid_cols = _NoScrollSpinBox()
         self._grid_cols.setRange(1, 4)
         self._grid_cols.setValue(2)
-        self._grid_cols.setFixedWidth(50)
+        self._grid_cols.setFixedWidth(70)
+        size_row.addWidget(QtWidgets.QLabel("Rows:"))
         size_row.addWidget(self._grid_rows)
-        size_row.addWidget(QtWidgets.QLabel("rows ×"))
+        size_row.addSpacing(20)
+        size_row.addWidget(QtWidgets.QLabel("Cols:"))
         size_row.addWidget(self._grid_cols)
-        size_row.addWidget(QtWidgets.QLabel("cols"))
         size_row.addStretch(1)
         vbox.addLayout(size_row)
 
@@ -376,7 +391,7 @@ class SetupPage(QtWidgets.QWidget):
         for i in range(len(self._camera_list.get_values())):
             opts.append((f"Video: Camera {i + 1}", f"video:{i}"))
         for i in range(len(self._shimmer_list.get_values())):
-            opts.append((f"ECG: Shimmer {i + 1}", f"ecg:{i}"))
+            opts.append((f"Physiological sensor {i + 1}", f"ecg:{i}"))
         for i in range(len(self._mic_list.get_values())):
             opts.append((f"Audio level: Mic {i + 1}", f"audio_level:{i}"))
             opts.append((f"Audio waveform: Mic {i + 1}", f"audio_wave:{i}"))
@@ -399,7 +414,7 @@ class SetupPage(QtWidgets.QWidget):
         for r in range(rows):
             row_combos: list[QtWidgets.QComboBox] = []
             for c in range(cols):
-                cb = QtWidgets.QComboBox()
+                cb = _NoScrollComboBox()
                 for lbl, val in opts:
                     cb.addItem(lbl, val)
                 # Restore previous value if available
@@ -428,7 +443,10 @@ class SetupPage(QtWidgets.QWidget):
     # ── Device scan ───────────────────────────────────────────────────────
     def _populate_devices(self, *, probe_cameras: bool) -> None:
         ports = device_scan.serial_ports()
-        self._avail_ports = [p.device for p in ports] or ["COM3", "COM4", "COM5", "COM6"]
+        self._avail_ports = (
+            [f"{p.device} – {p.description}" if p.description else p.device for p in ports]
+            or ["COM3", "COM4", "COM5", "COM6"]
+        )
 
         cams = device_scan.cameras() if probe_cameras else []
         self._avail_cams = [str(i) for i in cams] if cams else ["0", "1", "2", "3"]
@@ -449,8 +467,13 @@ class SetupPage(QtWidgets.QWidget):
         head = text.split(":", 1)[0].strip()
         return int(head) if head.isdigit() else text
 
+    @staticmethod
+    def _parse_port(text: str) -> str:
+        """Strip optional " – description" suffix, returning just the port name."""
+        return text.split(" –")[0].strip()
+
     def _bindings_from_fields(self) -> DeviceBindings:
-        shimmer_ports = [p for p in self._shimmer_list.get_values() if p]
+        shimmer_ports = [self._parse_port(p) for p in self._shimmer_list.get_values() if p]
         camera_indices = [int(c) for c in self._camera_list.get_values()
                           if c.strip().isdigit()]
         mic_devices = [self._parse_mic(m) for m in self._mic_list.get_values()
@@ -558,12 +581,23 @@ class PreflightPage(QtWidgets.QWidget):
         lay.addWidget(self.list)
         lay.addLayout(buttons)
 
+    _FRIENDLY_NAMES = {
+        "shimmer_serial": "Physiological sensor 1",
+        "camera": "Camera 1",
+        "microphone": "Microphone 1",
+        "labrecorder_rcs": "LabRecorder",
+        "dry_run": "Simulation mode",
+    }
+    _STATUS_WORDS = {"pass": "Good", "warn": "Warning", "fail": "Failed"}
+
     def update_report(self, report) -> None:
         self.list.clear()
         for c in report.checks:
             icon = {"pass": _OK, "warn": _WARN, "fail": _FAIL}.get(c.status, "?")
+            name = self._FRIENDLY_NAMES.get(c.name, c.name)
+            status = self._STATUS_WORDS.get(c.status, c.status)
             req = "" if c.required else "  (optional)"
-            self.list.addItem(f"{icon}  {c.name}: {c.detail}{req}")
+            self.list.addItem(f"{icon}  {name}   {status}   —   {c.detail}{req}")
         self._proceed.setEnabled(report.ok)
 
 
@@ -576,7 +610,8 @@ class LivenessPage(QtWidgets.QWidget):
         self.table.setHorizontalHeaderLabels(["stream", "rate (Hz)", "ch", "ok"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setMaximumWidth(340)
+        self.table.setMinimumWidth(680)
+        self.table.setMaximumWidth(1360)
 
         # Panel area — rebuilt by configure(); default = single device layout
         self._panel_container = QtWidgets.QWidget()
@@ -678,7 +713,7 @@ class CalibratePage(QtWidgets.QWidget):
         self.count_label.setStyleSheet("font-size:28px;")
         self.count_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.bar = QtWidgets.QProgressBar()
-        hint = QtWidgets.QLabel("Tap the spacebar firmly about every 2 seconds (~15 times).")
+        hint = QtWidgets.QLabel("Tap the spacebar firmly about every 2 seconds (~10 times).")
         hint.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
         self._done = QtWidgets.QPushButton("Calibrated — start recording →")
@@ -696,7 +731,7 @@ class CalibratePage(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(_heading(
             "Step 4 · Calibration block",
-            "Tap the spacebar firmly ~15 times (~2 s apart). These anchor the audio/video lag measurement."))
+            "Tap the spacebar firmly ~10 times (~2 s apart). These anchor the audio/video lag measurement."))
         lay.addWidget(hint)
         lay.addStretch(1)
         lay.addWidget(self.count_label)
@@ -775,16 +810,24 @@ class DonePage(QtWidgets.QWidget):
         cal = "calibrated" if controller.calibrated else "uncalibrated (profile-default lags)"
         pp = controller.postprocess_result
         if pp is not None:
-            verdict = pp.summary()
             headline = "✓ <b>Corrected, time-aligned dataset written</b> (drift-corrected, lag-subtracted)."
+            pp_lines = [
+                f"&nbsp;&nbsp;Overall: {pp.overall_status}",
+                f"&nbsp;&nbsp;Audit: {pp.audit_verdict}",
+            ]
+            for stage in pp.stages:
+                pp_lines.append(f"&nbsp;&nbsp;{stage.get('name', '?')}: {stage.get('status', '?')}")
+            verdict_html = "<br>".join(pp_lines)
         else:
-            verdict = "skipped — no .xdf found (dry-run, or LabRecorder saved outside the output folder)"
             headline = "Recording captured; automatic alignment did not run."
+            verdict_html = "&nbsp;&nbsp;skipped — no .xdf found (dry-run, or LabRecorder saved outside the output folder)"
         self.summary.setText(
             f"{headline}<br><br>"
             f"<b>{s.participant} / {s.session} / {s.task}</b><br>"
-            f"duration {s.duration_s}s · fiducials {controller.fiducial_count} · {cal}<br>"
-            f"post-processing: {verdict}"
+            f"Duration: {s.duration_s}s &nbsp;·&nbsp; "
+            f"Fiducials: {controller.fiducial_count} &nbsp;·&nbsp; {cal}<br><br>"
+            f"Post-processing:<br>"
+            f"{verdict_html}"
         )
         self.out_dir_label.setText(f"Output folder: {s.out_dir}")
         self._open.setEnabled(bool(s.out_dir))

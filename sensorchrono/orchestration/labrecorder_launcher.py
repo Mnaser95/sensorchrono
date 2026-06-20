@@ -125,16 +125,40 @@ class LabRecorderLauncher:
         exe = self.source_dir / _LABRECORDER_EXE
         if not exe.is_file():
             return False
-        base = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="sensorchrono_labrecorder_"))
-        dest = base / "LabRecorder"
-        shutil.copytree(self.source_dir, dest, dirs_exist_ok=True)
-        self._workdir = base
-        # Must be named "LabRecorder.cfg" — that is the filename App-LabRecorder
-        # auto-loads from its own directory on startup. Writing it here overwrites
-        # any bundled copy so our StudyRoot and RCSPort take effect.
-        config = dest / "LabRecorder.cfg"
-        config.write_text(render_config(out_dir, port=self.port), encoding="utf-8")
-        self._proc = subprocess.Popen([str(dest / _LABRECORDER_EXE)], cwd=str(dest))
+
+        cfg_text = render_config(out_dir, port=self.port)
+
+        # Prefer running LabRecorder in-place from its install directory.
+        # Copying to %TEMP% on every launch causes Windows Defender to flag the
+        # executable as unrecognised (new path = no reputation). Running from the
+        # stable, already-installed location avoids that prompt entirely.
+        # Fall back to a temp copy only when source_dir is read-only (e.g. a
+        # managed-machine Program Files install where we can't write the config).
+        launch_dir = self.source_dir
+        try:
+            # Must be named "LabRecorder.cfg" — App-LabRecorder auto-loads it
+            # from its own directory on startup. Writing it here sets StudyRoot
+            # and RCSPort for this session.
+            (self.source_dir / "LabRecorder.cfg").write_text(cfg_text, encoding="utf-8")
+        except OSError:
+            base = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="sensorchrono_labrecorder_"))
+            launch_dir = base / "LabRecorder"
+            shutil.copytree(self.source_dir, launch_dir, dirs_exist_ok=True)
+            self._workdir = base
+            (launch_dir / "LabRecorder.cfg").write_text(cfg_text, encoding="utf-8")
+
+        # Hide the LabRecorder window — it runs headlessly via RCS and the
+        # operator should never need to interact with its GUI.
+        startupinfo = None
+        if hasattr(subprocess, "STARTUPINFO"):
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # SW_HIDE
+        self._proc = subprocess.Popen(
+            [str(launch_dir / _LABRECORDER_EXE)],
+            cwd=str(launch_dir),
+            startupinfo=startupinfo,
+        )
         return wait_for_rcs(self.host, self.port, deadline_s=deadline_s, proc=self._proc)
 
     def stop(self) -> None:
