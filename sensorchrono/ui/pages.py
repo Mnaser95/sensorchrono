@@ -4,13 +4,42 @@ signals to the :class:`SessionController` and pushes state back to the pages.
 """
 from __future__ import annotations
 
-from PySide6 import QtCore, QtWidgets
+from pathlib import Path
+
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from sensorchrono.config import DeviceBindings
 from sensorchrono.orchestration import device_scan
-from sensorchrono.ui.theme import GOLD
+from sensorchrono.ui.theme import GOLD, WHITE, BLACK
 from sensorchrono.ui.video_preview import VideoPreview
 from sensorchrono.ui.waveform import AudioLevelMeter, WaveformWidget
+
+_ASSETS = Path(__file__).parent / "assets"
+
+_MIT_LICENSE = """\
+MIT License
+
+Copyright (c) 2024  Kennesaw State University
+                    Center for Cyber Physical Realms
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.\
+"""
 
 _OK = "✓"
 _WARN = "!"
@@ -27,6 +56,92 @@ def _heading(step: str, subtitle: str) -> QtWidgets.QLabel:
     lbl.setTextFormat(QtCore.Qt.TextFormat.RichText)
     lbl.setContentsMargins(4, 6, 4, 6)
     return lbl
+
+
+class SplashPage(QtWidgets.QWidget):
+    """Welcome / license screen shown on first launch before the wizard."""
+
+    proceed = QtCore.Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        from sensorchrono import __version__
+
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(60, 40, 60, 30)
+        lay.setSpacing(0)
+
+        # ── Logo ──────────────────────────────────────────────────────────
+        logo_lbl = QtWidgets.QLabel()
+        logo_lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        logo_path = _ASSETS / "ksu_logo.png"
+        if logo_path.exists():
+            pix = QtGui.QPixmap(str(logo_path)).scaledToHeight(
+                130, QtCore.Qt.TransformationMode.SmoothTransformation)
+            logo_lbl.setPixmap(pix)
+        else:
+            logo_lbl.setText(
+                f"<span style='color:{GOLD};font-size:36px;font-weight:bold;'>"
+                f"KSU</span>")
+        lay.addWidget(logo_lbl)
+        lay.addSpacing(20)
+
+        # ── App title ─────────────────────────────────────────────────────
+        title = QtWidgets.QLabel(
+            f"<span style='color:{GOLD};font-size:30px;font-weight:bold;"
+            f"letter-spacing:3px;'>SensorChrono</span>")
+        title.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        title.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        lay.addWidget(title)
+        lay.addSpacing(6)
+
+        ver = QtWidgets.QLabel(
+            f"<span style='color:#888;font-size:12px;'>version {__version__}</span>")
+        ver.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        ver.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        lay.addWidget(ver)
+        lay.addSpacing(4)
+
+        inst = QtWidgets.QLabel(
+            f"<span style='color:{WHITE};font-size:12px;'>"
+            f"Kennesaw State University &nbsp;·&nbsp; "
+            f"Center for Cyber Physical Realms</span>")
+        inst.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        inst.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        lay.addWidget(inst)
+        lay.addSpacing(24)
+
+        # ── Divider ───────────────────────────────────────────────────────
+        div = QtWidgets.QFrame()
+        div.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        div.setStyleSheet(f"color:#333;")
+        lay.addWidget(div)
+        lay.addSpacing(16)
+
+        # ── License ───────────────────────────────────────────────────────
+        lic_lbl = QtWidgets.QLabel(
+            f"<span style='color:{GOLD};font-size:11px;font-weight:bold;'>"
+            f"License</span>")
+        lic_lbl.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        lay.addWidget(lic_lbl)
+        lay.addSpacing(6)
+
+        lic_box = QtWidgets.QPlainTextEdit(_MIT_LICENSE)
+        lic_box.setReadOnly(True)
+        lic_box.setFixedHeight(160)
+        lic_box.setStyleSheet(
+            f"background:#0D0D0D; color:#AAAAAA; font-family:'Courier New',monospace;"
+            f"font-size:11px; border:1px solid #333; border-radius:4px; padding:6px;")
+        lay.addWidget(lic_box)
+        lay.addSpacing(20)
+
+        # ── Get Started button ────────────────────────────────────────────
+        start = QtWidgets.QPushButton("Get Started →")
+        start.setFixedHeight(40)
+        start.setFixedWidth(200)
+        start.clicked.connect(self.proceed.emit)
+        lay.addWidget(start, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+        lay.addStretch(1)
 
 
 class SetupPage(QtWidgets.QWidget):

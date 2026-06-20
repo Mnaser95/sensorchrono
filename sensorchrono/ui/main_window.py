@@ -30,6 +30,7 @@ from sensorchrono.ui.pages import (
     PreflightPage,
     RecordPage,
     SetupPage,
+    SplashPage,
 )
 from sensorchrono.ui.theme import APP_STYLESHEET, GOLD
 from sensorchrono.ui.video_preview import synthetic_frame
@@ -207,6 +208,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._record_t0 = 0.0
 
         # pages
+        self.splash = SplashPage()
         self.setup = SetupPage()
         self.preflight = PreflightPage()
         self.liveness = LivenessPage()
@@ -228,6 +230,7 @@ class MainWindow(QtWidgets.QMainWindow):
             SessionState.DONE: self.done, SessionState.ERROR: self.error,
         }
         self.stack = QtWidgets.QStackedWidget()
+        self.stack.addWidget(self.splash)          # index 0 — shown first
         for st in _PAGE_ORDER:
             self.stack.addWidget(self._pages[st])
 
@@ -240,6 +243,9 @@ class MainWindow(QtWidgets.QMainWindow):
         vbox.addWidget(self.stack)
         self.setCentralWidget(container)
         self.statusBar().showMessage("ready")
+
+        # splash → setup
+        self.splash.proceed.connect(lambda: self.stack.setCurrentWidget(self.setup))
 
         # page → controller wiring
         self.setup.started.connect(self._start_session)
@@ -260,7 +266,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._liveness_timer.timeout.connect(self._refresh)
 
         self.setup.load(self._base_session)
-        self.stack.setCurrentWidget(self.setup)
+        self.stack.setCurrentWidget(self.splash)
 
     # -- controller lifecycle ----------------------------------------------
     def _build_controller(self, session: SessionConfig) -> None:
