@@ -132,10 +132,9 @@ def log_environment_snapshot(config=None) -> None:
                 f"profile_id={getattr(config, 'profile_id', '?')}",
                 f"dry_run={getattr(config, 'dry_run', '?')}",
                 f"out_dir={getattr(config, 'out_dir', '?')}",
-                f"bindings.shimmer_com_port={getattr(b, 'shimmer_com_port', None)}",
-                f"bindings.shimmer_ecg_port={getattr(b, 'shimmer_ecg_port', None)}",
-                f"bindings.camera_index={getattr(b, 'camera_index', None)}",
-                f"bindings.mic_device={getattr(b, 'mic_device', None)!r}",
+                f"bindings.shimmer_com_ports={getattr(b, 'shimmer_com_ports', [])}",
+                f"bindings.camera_indices={getattr(b, 'camera_indices', [])}",
+                f"bindings.mic_devices={getattr(b, 'mic_devices', [])!r}",
             ]
         except Exception:  # pragma: no cover - defensive
             lines.append("bindings=<unreadable>")

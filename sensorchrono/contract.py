@@ -91,3 +91,21 @@ def spec(name: str | StreamName) -> StreamSpec:
     the enum, so an unknown name raises ``ValueError`` early rather than
     silently mismatching downstream)."""
     return STREAM_SPECS[StreamName(name)]
+
+
+def indexed_stream_name(base: StreamName, idx: int) -> str:
+    """LSL stream name for the device at fleet index ``idx``.
+
+    Index 0 keeps the canonical name for backward compatibility with existing
+    XDFs and analysis code. Higher indices append ``_<idx>`` so multiple
+    devices of the same type can coexist on one LSL network.
+
+    Examples::
+
+        indexed_stream_name(StreamName.SHIMMER_ECG, 0) == "ShimmerECG"
+        indexed_stream_name(StreamName.SHIMMER_ECG, 1) == "ShimmerECG_1"
+        indexed_stream_name(StreamName.VIDEO_FRAMES, 2) == "VideoFrames_2"
+    """
+    if idx == 0:
+        return str(base)
+    return f"{base}_{idx}"

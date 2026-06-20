@@ -240,9 +240,9 @@ def check_all(session, *, rcs_host: str = DEFAULT_RCS_HOST, rcs_port: int = DEFA
         b = session.bindings
         report = PreflightReport(
             checks=[
-                check_serial_port(b.shimmer_com_port),
-                check_camera(b.camera_index),
-                check_microphone(b.mic_device),
+                check_serial_port(b.shimmer_com_ports[0] if b.shimmer_com_ports else None),
+                check_camera(b.camera_indices[0] if b.camera_indices else None),
+                check_microphone(b.mic_devices[0] if b.mic_devices else None),
                 check_labrecorder(rcs_host, rcs_port, dry_run=False),
             ]
         )

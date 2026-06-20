@@ -72,14 +72,14 @@ def test_real_capture_requires_device_bindings(tmp_path):
     with pytest.raises(ConfigError) as exc:
         _valid(tmp_path, dry_run=False).validate()
     msg = str(exc.value)
-    assert "shimmer_com_port" in msg and "camera_index" in msg
+    assert "Shimmer" in msg and "camera" in msg
 
 
 def test_real_capture_passes_with_bindings(tmp_path):
     cfg = _valid(
         tmp_path,
         dry_run=False,
-        bindings=DeviceBindings(shimmer_com_port="COM7", camera_index=0),
+        bindings=DeviceBindings(shimmer_com_ports=["COM7"], camera_indices=[0]),
     )
     cfg.validate()  # should not raise
 
@@ -95,13 +95,14 @@ def test_all_errors_collected_not_just_first(tmp_path):
 def test_yaml_round_trip_preserves_fields(tmp_path):
     cfg = _valid(
         tmp_path,
-        bindings=DeviceBindings(shimmer_com_port="COM7", camera_index=2, mic_device="BRIO"),
+        bindings=DeviceBindings(shimmer_com_ports=["COM7"], camera_indices=[2],
+                                mic_devices=["BRIO"]),
     )
     path = cfg.save(tmp_path / "config.yaml")
     loaded = SessionConfig.load(path)
     assert loaded.participant == cfg.participant
     assert loaded.duration_s == cfg.duration_s
     assert loaded.profile_id == cfg.profile_id
-    assert loaded.bindings.shimmer_com_port == "COM7"
-    assert loaded.bindings.camera_index == 2
+    assert loaded.bindings.shimmer_com_ports == ["COM7"]
+    assert loaded.bindings.camera_indices == [2]
     assert isinstance(loaded.out_dir, Path)

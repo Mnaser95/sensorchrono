@@ -47,6 +47,9 @@ def main(argv=None):
     parser.add_argument("--duration", type=float, default=0.0)
     parser.add_argument("--tag", default="exp03")
     parser.add_argument("--out-dir", default=r"C:\Users\ngoldbla\Desktop\LSL_data")
+    parser.add_argument("--stream-name", default="Audio",
+                        help="LSL stream name (default Audio; set to Audio_1 etc. "
+                             "for the second microphone in a multi-mic rig).")
     args = parser.parse_args(argv)
 
     out_dir = Path(args.out_dir)
@@ -59,12 +62,12 @@ def main(argv=None):
           f"({1000*args.block_size/args.sample_rate:.1f} ms)")
 
     info = pylsl.StreamInfo(
-        name="Audio",
+        name=args.stream_name,
         type="Audio",
         channel_count=args.channels,
         nominal_srate=float(args.sample_rate),
         channel_format=pylsl.cf_float32,
-        source_id="sensorchrono_mic",
+        source_id=f"sensorchrono_mic_{args.stream_name}",
     )
     chns = info.desc().append_child("channels")
     for c in range(args.channels):
@@ -74,7 +77,7 @@ def main(argv=None):
         ch.append_child_value("type", "Audio")
     info.desc().append_child_value("manufacturer", str(dev_info["name"]))
     outlet = pylsl.StreamOutlet(info, chunk_size=args.block_size, max_buffered=600)
-    print(f"[audio] LSL outlet 'Audio' is live.")
+    print(f"[audio] LSL outlet '{args.stream_name}' is live.")
 
     # Open WAV writer
     wav = wave.open(str(wav_path), "wb")

@@ -144,14 +144,105 @@ class SplashPage(QtWidgets.QWidget):
         lay.addStretch(1)
 
 
+class _DeviceRow(QtWidgets.QWidget):
+    """One row in a _MultiDeviceList: combo picker + remove button."""
+
+    removed = QtCore.Signal(object)  # emits self
+
+    def __init__(self, options: list[str], editable: bool = True, parent=None) -> None:
+        super().__init__(parent)
+        self.combo = QtWidgets.QComboBox()
+        self.combo.setEditable(editable)
+        self.combo.addItems(options)
+        rm = QtWidgets.QPushButton("✕")
+        rm.setFixedWidth(30)
+        rm.setProperty("role", "danger")
+        rm.clicked.connect(lambda: self.removed.emit(self))
+        row = QtWidgets.QHBoxLayout(self)
+        row.setContentsMargins(0, 2, 0, 2)
+        row.setSpacing(4)
+        row.addWidget(self.combo, 1)
+        row.addWidget(rm)
+
+
+class _MultiDeviceList(QtWidgets.QGroupBox):
+    """Add / remove device list for one device type (Shimmer / Camera / Mic)."""
+
+    changed = QtCore.Signal()
+
+    def __init__(self, title: str, options_fn, editable: bool = True,
+                 parent=None) -> None:
+        super().__init__(title, parent)
+        self._options_fn = options_fn  # callable → list[str] of current choices
+        self._editable = editable
+        self._rows: list[_DeviceRow] = []
+
+        add_btn = QtWidgets.QPushButton("+ Add")
+        add_btn.setProperty("role", "secondary")
+        add_btn.setFixedWidth(70)
+        add_btn.clicked.connect(self.add_row)
+
+        hdr = QtWidgets.QHBoxLayout()
+        hdr.addStretch(1)
+        hdr.addWidget(add_btn)
+
+        self._empty = QtWidgets.QLabel("(none — all disabled)")
+        self._empty.setStyleSheet("color:#666;font-style:italic;padding:4px;")
+
+        self._body = QtWidgets.QVBoxLayout()
+        self._body.setSpacing(2)
+        self._body.addWidget(self._empty)
+
+        vbox = QtWidgets.QVBoxLayout(self)
+        vbox.setSpacing(4)
+        vbox.addLayout(hdr)
+        vbox.addLayout(self._body)
+
+    def add_row(self, value: str | None = None) -> _DeviceRow:
+        opts = self._options_fn()
+        row = _DeviceRow(opts, editable=self._editable)
+        if value is not None:
+            row.combo.setCurrentText(str(value))
+        row.removed.connect(self._remove_row)
+        self._rows.append(row)
+        self._body.addWidget(row)
+        self._empty.setVisible(False)
+        self.changed.emit()
+        return row
+
+    def _remove_row(self, row: _DeviceRow) -> None:
+        self._rows.remove(row)
+        self._body.removeWidget(row)
+        row.deleteLater()
+        self._empty.setVisible(len(self._rows) == 0)
+        self.changed.emit()
+
+    def clear_rows(self) -> None:
+        for row in list(self._rows):
+            self._remove_row(row)
+
+    def refresh_options(self) -> None:
+        opts = self._options_fn()
+        for row in self._rows:
+            cur = row.combo.currentText()
+            row.combo.clear()
+            row.combo.addItems(opts)
+            row.combo.setCurrentText(cur)
+
+    def get_values(self) -> list[str]:
+        return [r.combo.currentText().strip() for r in self._rows]
+
+
 class SetupPage(QtWidgets.QWidget):
     started = QtCore.Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+
+        # ── Session labels ────────────────────────────────────────────────
         form = QtWidgets.QFormLayout()
         self.participant = QtWidgets.QLineEdit()
-        self.session = QtWidgets.QLineEdit()
+        self.session_id = QtWidgets.QLineEdit()
         self.task = QtWidgets.QLineEdit()
         self.duration = QtWidgets.QSpinBox()
         self.duration.setRange(5, 14400)
@@ -161,82 +252,185 @@ class SetupPage(QtWidgets.QWidget):
         self.out_dir = QtWidgets.QLabel()
         self.out_dir.setStyleSheet("color:#888;")
         form.addRow("Participant", self.participant)
-        form.addRow("Session", self.session)
+        form.addRow("Session", self.session_id)
         form.addRow("Task", self.task)
         form.addRow("Duration", self.duration)
         form.addRow("", self.dry_run)
         form.addRow("Output dir", self.out_dir)
 
-        self.bindings_group = self._build_bindings_group()
+        # ── Available device lists (populated by scan) ────────────────────
+        self._avail_ports: list[str] = ["COM3", "COM4", "COM5", "COM6"]
+        self._avail_cams: list[str] = ["0", "1", "2", "3"]
+        self._avail_mics: list[str] = [_MIC_DEFAULT]
 
+        self._shimmer_list = _MultiDeviceList(
+            "Shimmer devices  (ECG/EMG)",
+            lambda: self._avail_ports, editable=True)
+        self._camera_list = _MultiDeviceList(
+            "Cameras  (UVC webcams)",
+            lambda: self._avail_cams, editable=True)
+        self._mic_list = _MultiDeviceList(
+            "Microphones",
+            lambda: self._avail_mics, editable=True)
+
+        self._shimmer_list.changed.connect(self._refresh_display_options)
+        self._camera_list.changed.connect(self._refresh_display_options)
+        self._mic_list.changed.connect(self._refresh_display_options)
+
+        self._hw_group = QtWidgets.QWidget()
+        hw = QtWidgets.QVBoxLayout(self._hw_group)
+        hw.setContentsMargins(0, 0, 0, 0)
+        hw.setSpacing(6)
+        hw.addWidget(self._shimmer_list)
+        hw.addWidget(self._camera_list)
+        hw.addWidget(self._mic_list)
+
+        # ── Display layout ────────────────────────────────────────────────
+        self._display_group = self._build_display_group()
+
+        # ── Error + buttons ───────────────────────────────────────────────
         self.error = QtWidgets.QLabel()
         self.error.setStyleSheet("color:#C0392B;font-weight:600;")
         self.error.setWordWrap(True)
+
+        rescan = QtWidgets.QPushButton("Rescan devices")
+        rescan.setProperty("role", "secondary")
+        rescan.clicked.connect(lambda: self._populate_devices(probe_cameras=True))
         start = QtWidgets.QPushButton("Start session →")
         start.clicked.connect(self.started.emit)
+        btns = QtWidgets.QHBoxLayout()
+        btns.addWidget(rescan)
+        btns.addStretch(1)
+        btns.addWidget(start)
+
+        # ── Scrollable body ───────────────────────────────────────────────
+        body = QtWidgets.QWidget()
+        vbody = QtWidgets.QVBoxLayout(body)
+        vbody.setContentsMargins(2, 2, 8, 2)
+        vbody.setSpacing(10)
+        vbody.addLayout(form)
+        vbody.addWidget(self._hw_group)
+        vbody.addWidget(self._display_group)
+        vbody.addStretch(1)
+
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidget(body)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(_heading(
             "Step 1 · Set up recording",
-            "Connect your devices, fill in the labels, pick the hardware bindings, then Start session →"))
-        lay.addLayout(form)
-        lay.addWidget(self.bindings_group)
+            "Add devices, fill in labels, design the display grid, then Start session →"))
+        lay.addWidget(scroll, 1)
         lay.addWidget(self.error)
-        lay.addStretch(1)
-        lay.addWidget(start, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+        lay.addLayout(btns)
 
-        # Cheap, non-intrusive scans (COM ports + mics) at construction; cameras
-        # are only probed when the operator clicks "Rescan devices".
         self._populate_devices(probe_cameras=False)
 
-    # -- device bindings ----------------------------------------------------
-    def _build_bindings_group(self) -> QtWidgets.QGroupBox:
-        group = QtWidgets.QGroupBox("Hardware bindings (real capture)")
-        bform = QtWidgets.QFormLayout()
-        self.shimmer_port = QtWidgets.QComboBox()
-        self.shimmer_port.setEditable(True)
-        self.shimmer_port.setToolTip(
-            "COM port the Shimmer is paired on (Bluetooth shows up as a "
-            "'Standard Serial over Bluetooth link' port)."
-        )
-        self.camera_index = QtWidgets.QComboBox()
-        self.camera_index.setEditable(True)
-        self.camera_index.setToolTip("OpenCV camera index for the webcam (usually 0).")
-        self.mic_device = QtWidgets.QComboBox()
-        self.mic_device.setEditable(True)
-        self.mic_device.setToolTip("Audio input device for the mic; leave on system default if unsure.")
-        self.rescan_devices = QtWidgets.QPushButton("Rescan devices")
-        self.rescan_devices.clicked.connect(lambda: self._populate_devices(probe_cameras=True))
-        bform.addRow("Shimmer COM port", self.shimmer_port)
-        bform.addRow("Camera index", self.camera_index)
-        bform.addRow("Microphone", self.mic_device)
-        bform.addRow("", self.rescan_devices)
-        group.setLayout(bform)
-        return group
+    # ── Display layout ────────────────────────────────────────────────────
+    def _build_display_group(self) -> QtWidgets.QGroupBox:
+        grp = QtWidgets.QGroupBox("Display layout (live monitor grid)")
+        vbox = QtWidgets.QVBoxLayout(grp)
 
+        size_row = QtWidgets.QHBoxLayout()
+        size_row.addWidget(QtWidgets.QLabel("Grid:"))
+        self._grid_rows = QtWidgets.QSpinBox()
+        self._grid_rows.setRange(1, 4)
+        self._grid_rows.setValue(2)
+        self._grid_rows.setFixedWidth(50)
+        self._grid_cols = QtWidgets.QSpinBox()
+        self._grid_cols.setRange(1, 4)
+        self._grid_cols.setValue(2)
+        self._grid_cols.setFixedWidth(50)
+        size_row.addWidget(self._grid_rows)
+        size_row.addWidget(QtWidgets.QLabel("rows ×"))
+        size_row.addWidget(self._grid_cols)
+        size_row.addWidget(QtWidgets.QLabel("cols"))
+        size_row.addStretch(1)
+        vbox.addLayout(size_row)
+
+        self._grid_rows.valueChanged.connect(self._rebuild_display_grid)
+        self._grid_cols.valueChanged.connect(self._rebuild_display_grid)
+
+        self._grid_widget = QtWidgets.QWidget()
+        self._grid_layout = QtWidgets.QGridLayout(self._grid_widget)
+        self._grid_layout.setSpacing(4)
+        vbox.addWidget(self._grid_widget)
+
+        self._cell_combos: list[list[QtWidgets.QComboBox]] = []
+        self._rebuild_display_grid()
+        return grp
+
+    def _panel_options(self) -> list[tuple[str, str]]:
+        opts: list[tuple[str, str]] = [("(empty)", "")]
+        for i in range(len(self._camera_list.get_values())):
+            opts.append((f"Video: Camera {i + 1}", f"video:{i}"))
+        for i in range(len(self._shimmer_list.get_values())):
+            opts.append((f"ECG: Shimmer {i + 1}", f"ecg:{i}"))
+        for i in range(len(self._mic_list.get_values())):
+            opts.append((f"Audio level: Mic {i + 1}", f"audio_level:{i}"))
+            opts.append((f"Audio waveform: Mic {i + 1}", f"audio_wave:{i}"))
+        return opts
+
+    def _rebuild_display_grid(self) -> None:
+        rows = self._grid_rows.value()
+        cols = self._grid_cols.value()
+        # Snapshot current values before clearing
+        old: list[list[str]] = []
+        for row_combos in self._cell_combos:
+            old.append([cb.currentData() or "" for cb in row_combos])
+        # Clear
+        while self._grid_layout.count():
+            item = self._grid_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        opts = self._panel_options()
+        self._cell_combos = []
+        for r in range(rows):
+            row_combos: list[QtWidgets.QComboBox] = []
+            for c in range(cols):
+                cb = QtWidgets.QComboBox()
+                for lbl, val in opts:
+                    cb.addItem(lbl, val)
+                # Restore previous value if available
+                prev = old[r][c] if r < len(old) and c < len(old[r]) else ""
+                for i in range(cb.count()):
+                    if cb.itemData(i) == prev:
+                        cb.setCurrentIndex(i)
+                        break
+                self._grid_layout.addWidget(cb, r, c)
+                row_combos.append(cb)
+            self._cell_combos.append(row_combos)
+
+    def _refresh_display_options(self) -> None:
+        opts = self._panel_options()
+        for row_combos in self._cell_combos:
+            for cb in row_combos:
+                cur_val = cb.currentData()
+                cb.clear()
+                for lbl, val in opts:
+                    cb.addItem(lbl, val)
+                for i in range(cb.count()):
+                    if cb.itemData(i) == cur_val:
+                        cb.setCurrentIndex(i)
+                        break
+
+    # ── Device scan ───────────────────────────────────────────────────────
     def _populate_devices(self, *, probe_cameras: bool) -> None:
-        """(Re)fill the binding dropdowns from a hardware scan, preserving any
-        value the operator already chose and falling back to sensible defaults."""
-        prev_port = self.shimmer_port.currentText().strip()
-        prev_cam = self.camera_index.currentText().strip()
-        prev_mic = self.mic_device.currentText().strip()
-
         ports = device_scan.serial_ports()
-        self.shimmer_port.clear()
-        self.shimmer_port.addItems([p.device for p in ports])
-        # Prefer the operator's prior pick, else the first (Bluetooth-first) port.
-        self.shimmer_port.setCurrentText(prev_port or (ports[0].device if ports else ""))
+        self._avail_ports = [p.device for p in ports] or ["COM3", "COM4", "COM5", "COM6"]
 
         cams = device_scan.cameras() if probe_cameras else []
-        self.camera_index.clear()
-        self.camera_index.addItems([str(i) for i in cams] or ["0", "1", "2", "3"])
-        self.camera_index.setCurrentText(prev_cam or (str(cams[0]) if cams else "0"))
+        self._avail_cams = [str(i) for i in cams] if cams else ["0", "1", "2", "3"]
 
-        self.mic_device.clear()
-        self.mic_device.addItem(_MIC_DEFAULT, None)
+        self._avail_mics = [_MIC_DEFAULT]
         for m in device_scan.microphones():
-            self.mic_device.addItem(f"{m.index}: {m.name}", m.index)
-        self.mic_device.setCurrentText(prev_mic or _MIC_DEFAULT)
+            self._avail_mics.append(f"{m.index}: {m.name}")
+
+        self._shimmer_list.refresh_options()
+        self._camera_list.refresh_options()
+        self._mic_list.refresh_options()
 
     @staticmethod
     def _parse_mic(text: str):
@@ -247,41 +441,69 @@ class SetupPage(QtWidgets.QWidget):
         return int(head) if head.isdigit() else text
 
     def _bindings_from_fields(self) -> DeviceBindings:
-        port = self.shimmer_port.currentText().strip() or None
-        cam_text = self.camera_index.currentText().strip()
-        camera = int(cam_text) if cam_text.isdigit() else None
+        shimmer_ports = [p for p in self._shimmer_list.get_values() if p]
+        camera_indices = [int(c) for c in self._camera_list.get_values()
+                          if c.strip().isdigit()]
+        mic_devices = [self._parse_mic(m) for m in self._mic_list.get_values()
+                       if self._parse_mic(m) is not None]
+        display_grid = [
+            [cb.currentData() or "" for cb in row_combos]
+            for row_combos in self._cell_combos
+        ]
         return DeviceBindings(
-            shimmer_com_port=port,
-            shimmer_ecg_port=port,  # the BT COM port doubles as the ECG bridge port
-            camera_index=camera,
-            mic_device=self._parse_mic(self.mic_device.currentText()),
+            shimmer_com_ports=shimmer_ports,
+            camera_indices=camera_indices,
+            mic_devices=mic_devices,
+            display_grid=display_grid,
         )
 
     def _on_dry_run_toggled(self, checked: bool) -> None:
-        # Bindings are only required for real capture; grey them out in dry-run
-        # so the synthetic path stays one-click.
-        self.bindings_group.setEnabled(not checked)
+        self._hw_group.setEnabled(not checked)
 
+    # ── Public interface ──────────────────────────────────────────────────
     def load(self, session) -> None:
         self.participant.setText(session.participant)
-        self.session.setText(session.session)
+        self.session_id.setText(session.session)
         self.task.setText(session.task)
         self.duration.setValue(int(session.duration_s))
         self.dry_run.setChecked(bool(session.dry_run))
         self.out_dir.setText(str(session.out_dir))
+
         b = session.bindings
-        if b.shimmer_com_port:
-            self.shimmer_port.setCurrentText(str(b.shimmer_com_port))
-        if b.camera_index is not None:
-            self.camera_index.setCurrentText(str(b.camera_index))
-        if b.mic_device is not None:
-            self.mic_device.setCurrentText(str(b.mic_device))
+        self._shimmer_list.clear_rows()
+        for port in b.shimmer_com_ports:
+            self._shimmer_list.add_row(port)
+
+        self._camera_list.clear_rows()
+        for cam in b.camera_indices:
+            self._camera_list.add_row(str(cam))
+
+        self._mic_list.clear_rows()
+        for dev in b.mic_devices:
+            self._mic_list.add_row(
+                f"{dev}" if dev is not None else _MIC_DEFAULT)
+
+        if b.display_grid:
+            nrows = len(b.display_grid)
+            ncols = max((len(r) for r in b.display_grid), default=1)
+            self._grid_rows.setValue(nrows)
+            self._grid_cols.setValue(ncols)
+            self._rebuild_display_grid()
+            for r, row_vals in enumerate(b.display_grid):
+                for c, val in enumerate(row_vals):
+                    if r < len(self._cell_combos) and c < len(self._cell_combos[r]):
+                        cb = self._cell_combos[r][c]
+                        for i in range(cb.count()):
+                            if cb.itemData(i) == val:
+                                cb.setCurrentIndex(i)
+                                break
+
         self._on_dry_run_toggled(bool(session.dry_run))
         self.error.clear()
 
     def apply_to(self, session) -> None:
         session.participant = self.participant.text().strip()
-        session.session = self.session.text().strip()
+        session.session = self.session_id.text().strip()
         session.task = self.task.text().strip()
         session.duration_s = int(self.duration.value())
         session.dry_run = self.dry_run.isChecked()
@@ -335,19 +557,27 @@ class LivenessPage(QtWidgets.QWidget):
         self.table.setHorizontalHeaderLabels(["stream", "rate (Hz)", "ch", "ok"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setMaximumWidth(340)
 
+        # Panel area — rebuilt by configure(); default = single device layout
+        self._panel_container = QtWidgets.QWidget()
+        self._panel_gl = QtWidgets.QGridLayout(self._panel_container)
+        self._panel_gl.setSpacing(4)
+
+        # Default single-device widgets (used when configure() is never called)
         self.preview = VideoPreview()
         self.waveform = WaveformWidget()
         self.meter = AudioLevelMeter()
+        self._panel_gl.addWidget(self.preview, 0, 0)
+        self._panel_gl.addWidget(self.waveform, 1, 0)
+        self._panel_gl.addWidget(self.meter, 2, 0)
 
-        right = QtWidgets.QVBoxLayout()
-        right.addWidget(self.preview)
-        right.addWidget(self.waveform)
-        right.addWidget(self.meter)
+        # panels: stream_name → list of (widget, update_type) for LiveView
+        self.panels: dict[str, list] = {}
 
         split = QtWidgets.QHBoxLayout()
-        split.addWidget(self.table, 1)
-        split.addLayout(right, 1)
+        split.addWidget(self.table)
+        split.addWidget(self._panel_container, 1)
 
         self._go = QtWidgets.QPushButton("Go to Recording →")
         self._go.setEnabled(False)
@@ -356,9 +586,59 @@ class LivenessPage(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(_heading(
             "Step 3 · Staging — every stream live and healthy?",
-            "Watch the live ECG trace + camera preview. When all streams read OK, Go to Recording →"))
+            "Live feeds update automatically. When all streams read OK, Go to Recording →"))
         lay.addLayout(split)
         lay.addWidget(self._go, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+
+    def configure(self, display_grid: list[list[str]]) -> None:
+        """Rebuild the panel area from the 2-D display_grid spec set on SetupPage."""
+        # Clear existing panels
+        while self._panel_gl.count():
+            item = self._panel_gl.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.panels.clear()
+
+        if not display_grid:
+            # Fall back to the default single-device layout
+            self.preview = VideoPreview()
+            self.waveform = WaveformWidget()
+            self.meter = AudioLevelMeter()
+            self._panel_gl.addWidget(self.preview, 0, 0)
+            self._panel_gl.addWidget(self.waveform, 1, 0)
+            self._panel_gl.addWidget(self.meter, 2, 0)
+            return
+
+        for r, row in enumerate(display_grid):
+            for c, cell_type in enumerate(row):
+                if not cell_type:
+                    continue
+                kind, _, idx_str = cell_type.partition(":")
+                idx = int(idx_str) if idx_str.isdigit() else 0
+                stream_name = {
+                    "video": "VideoFrames" if idx == 0 else f"VideoFrames_{idx}",
+                    "ecg": "ShimmerECG" if idx == 0 else f"ShimmerECG_{idx}",
+                    "audio_level": "Audio" if idx == 0 else f"Audio_{idx}",
+                    "audio_wave": "Audio" if idx == 0 else f"Audio_{idx}",
+                }.get(kind)
+                if stream_name is None:
+                    continue
+                if kind == "video":
+                    w = VideoPreview()
+                    if idx == 0:
+                        self.preview = w
+                elif kind == "ecg":
+                    w = WaveformWidget()
+                    if idx == 0:
+                        self.waveform = w
+                elif kind in ("audio_level", "audio_wave"):
+                    w = AudioLevelMeter() if kind == "audio_level" else WaveformWidget()
+                    if idx == 0 and kind == "audio_level":
+                        self.meter = w
+                else:
+                    continue
+                self.panels.setdefault(stream_name, []).append((w, kind))
+                self._panel_gl.addWidget(w, r, c)
 
     def update_report(self, report) -> None:
         self.table.setRowCount(len(report.streams))

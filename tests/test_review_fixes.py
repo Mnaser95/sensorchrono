@@ -110,7 +110,7 @@ def test_dry_run_false_survives_round_trip(tmp_path):
     cfg = SessionConfig(
         participant="p", session="s", task="t", duration_s=60,
         out_dir=tmp_path / "o", profile_id=DEFAULT_PROFILE_ID, dry_run=False,
-        bindings=DeviceBindings(shimmer_com_port="COM7", camera_index=0),
+        bindings=DeviceBindings(shimmer_com_ports=["COM7"], camera_indices=[0]),
     )
     loaded = SessionConfig.load(cfg.save(tmp_path / "c.yaml"))
     assert loaded.dry_run is False

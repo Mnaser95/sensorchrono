@@ -68,16 +68,14 @@ def open_camera(device, width, height, fps, codec, backend):
     return cap, actual_w, actual_h, actual_fps
 
 
-def create_outlet(target_fps):
+def create_outlet(target_fps, stream_name: str = "VideoFrames"):
     info = pylsl.StreamInfo(
-        name="VideoFrames",
+        name=stream_name,
         type="VideoFrames",
         channel_count=2,
         nominal_srate=float(target_fps),
         channel_format=pylsl.cf_double64,
-        # Generic: the capture device is whatever UVC camera the operator bound
-        # (--device index). Not tied to any brand.
-        source_id="sensorchrono_video",
+        source_id=f"sensorchrono_video_{stream_name}",
     )
     chns = info.desc().append_child("channels")
     for label, unit in [("frame_idx", "count"), ("cap_pos_ms", "milliseconds")]:
@@ -87,7 +85,7 @@ def create_outlet(target_fps):
         ch.append_child_value("type", "VideoFrames")
     info.desc().append_child_value("manufacturer", "generic-UVC")
     outlet = pylsl.StreamOutlet(info, chunk_size=1, max_buffered=600)
-    print(f"[video] LSL outlet 'VideoFrames' is live.")
+    print(f"[video] LSL outlet '{stream_name}' is live.")
     return outlet
 
 
@@ -141,6 +139,9 @@ def main(argv=None):
     parser.add_argument("--stop-file", default=None,
                         help="Path polled every 10 frames; when it appears the bridge "
                              "exits cleanly so writer.release() finalizes the MP4.")
+    parser.add_argument("--stream-name", default="VideoFrames",
+                        help="LSL stream name (default VideoFrames; set to VideoFrames_1 "
+                             "etc. for the second camera in a multi-camera rig).")
     args = parser.parse_args(argv)
 
     out_dir = Path(args.out_dir)
@@ -160,7 +161,7 @@ def main(argv=None):
         writer = cv2.VideoWriter(str(mp4_path), fourcc_writer, args.fps, (w, h))
     print(f"[video] writing MP4 to {mp4_path}")
 
-    outlet = create_outlet(args.fps)
+    outlet = create_outlet(args.fps, stream_name=args.stream_name)
 
     csv_f = open(csv_path, "w", newline="")
     csv_w = csv.writer(csv_f)

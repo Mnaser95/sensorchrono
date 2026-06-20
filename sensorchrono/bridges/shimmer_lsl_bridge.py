@@ -167,6 +167,9 @@ def parse_args(argv=None):
                         help="Skip the 'Press Enter' prompt and start recording after a fixed delay. Used for headless runs.")
     parser.add_argument("--start-delay", type=float, default=3.0,
                         help="With --no-prompt, wait this many seconds before recording starts. Default 3.0.")
+    parser.add_argument("--stream-suffix", default="",
+                        help="Appended to LSL stream names (e.g. '_1' gives ShimmerECG_1). "
+                             "Empty string (default) keeps canonical names for backward compat.")
     return parser.parse_args(argv)
 
 
@@ -180,7 +183,7 @@ def choose_run_mode(mode):
 
 
 
-def run_ecg(ser, out, marker_outlet, marker_lock, shared_start):
+def run_ecg(ser, out, marker_outlet, marker_lock, shared_start, stream_suffix=""):
     print(f"[{ser.name}] Running ECG...")
 
     send_cmd(ser, struct.pack('BBBB', 0x08, 0x00, 0x00, 0x18), "Enable EXG")
@@ -222,8 +225,9 @@ def run_ecg(ser, out, marker_outlet, marker_lock, shared_start):
     print(f"[{ser.name}] Sync: offset={best_offset}, error={-best_score:.1f} ticks")
     buffer = sync_buf[best_offset:]
 
-    info = pylsl.StreamInfo("ShimmerECG", "ECG", 4, sampling_freq,
-                            pylsl.cf_float32, f"ecg_{ser.name}")
+    ecg_stream_name = f"ShimmerECG{stream_suffix}"
+    info = pylsl.StreamInfo(ecg_stream_name, "ECG", 4, sampling_freq,
+                            pylsl.cf_float32, f"ecg_{ser.name}{stream_suffix}")
     chns = info.desc().append_child("channels")
     for label, unit in [("ts_sec", "seconds"), ("Lead_I", "millivolts"),
                         ("Lead_II", "millivolts"), ("Lead_III", "millivolts")]:
@@ -232,7 +236,7 @@ def run_ecg(ser, out, marker_outlet, marker_lock, shared_start):
         ch.append_child_value("unit", unit)
         ch.append_child_value("type", "ECG")
     outlet = pylsl.StreamOutlet(info)
-    print(f"[{ser.name}] LSL outlet: ShimmerECG @ {sampling_freq} Hz")
+    print(f"[{ser.name}] LSL outlet: {ecg_stream_name} @ {sampling_freq} Hz")
     emit_marker(marker_outlet, marker_lock, "stream_ready", "ECG",
                 device_port=ser.name, nominal_srate=sampling_freq)
 
@@ -305,7 +309,7 @@ def run_ecg(ser, out, marker_outlet, marker_lock, shared_start):
     out['Lead_III'] = lead2_f - lead1_f
 
 
-def run_emg(ser, out, marker_outlet, marker_lock, shared_start):
+def run_emg(ser, out, marker_outlet, marker_lock, shared_start, stream_suffix=""):
     print(f"[{ser.name}] Running EMG...")
 
     ser.write(struct.pack('B', 0x20))
@@ -352,8 +356,9 @@ def run_emg(ser, out, marker_outlet, marker_lock, shared_start):
     print(f"[{ser.name}] Sync: offset={best_offset}, error={-best_score:.1f} ticks")
     buffer = sync_buf[best_offset:]
 
-    info = pylsl.StreamInfo("ShimmerEMG", "EMG", 3, sampling_freq,
-                            pylsl.cf_float32, f"emg_{ser.name}")
+    emg_stream_name = f"ShimmerEMG{stream_suffix}"
+    info = pylsl.StreamInfo(emg_stream_name, "EMG", 3, sampling_freq,
+                            pylsl.cf_float32, f"emg_{ser.name}{stream_suffix}")
     chns = info.desc().append_child("channels")
     for label, unit in [("ts_sec", "seconds"), ("EMG_CH1", "millivolts"),
                         ("EMG_CH2", "millivolts")]:
@@ -362,7 +367,7 @@ def run_emg(ser, out, marker_outlet, marker_lock, shared_start):
         ch.append_child_value("unit", unit)
         ch.append_child_value("type", "EMG")
     outlet = pylsl.StreamOutlet(info)
-    print(f"[{ser.name}] LSL outlet: ShimmerEMG @ {sampling_freq} Hz")
+    print(f"[{ser.name}] LSL outlet: {emg_stream_name} @ {sampling_freq} Hz")
     emit_marker(marker_outlet, marker_lock, "stream_ready", "EMG",
                 device_port=ser.name, nominal_srate=sampling_freq)
 
@@ -566,13 +571,15 @@ def main(argv=None):
     if ecg_ser is not None:
         threads.append(threading.Thread(
             target=run_ecg,
-            args=(ecg_ser, ecg_out, marker_outlet, marker_lock, shared_start),
+            args=(ecg_ser, ecg_out, marker_outlet, marker_lock, shared_start,
+                  args.stream_suffix),
             daemon=True,
         ))
     if emg_ser is not None:
         threads.append(threading.Thread(
             target=run_emg,
-            args=(emg_ser, emg_out, marker_outlet, marker_lock, shared_start),
+            args=(emg_ser, emg_out, marker_outlet, marker_lock, shared_start,
+                  args.stream_suffix),
             daemon=True,
         ))
 

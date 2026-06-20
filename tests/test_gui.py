@@ -45,13 +45,22 @@ def _session(tmp_path, **over):
     return SessionConfig(**kw)
 
 
-def test_window_starts_on_setup(app, tmp_path):
+def test_window_starts_on_splash(app, tmp_path):
     w = MainWindow(_session(tmp_path))
+    assert w.stack.currentWidget() is w.splash
+
+
+def test_splash_proceeds_to_setup(app, tmp_path):
+    w = MainWindow(_session(tmp_path))
+    w.splash.proceed.emit()
+    app.processEvents()
     assert w.stack.currentWidget() is w.setup
 
 
 def test_setup_advances_to_preflight(app, tmp_path):
     w = MainWindow(_session(tmp_path))
+    w.splash.proceed.emit()
+    app.processEvents()
     w.setup.started.emit()
     app.processEvents()
     assert w.controller.state == SessionState.PREFLIGHT
@@ -61,27 +70,26 @@ def test_setup_advances_to_preflight(app, tmp_path):
 
 
 def test_setup_apply_collects_device_bindings(app, tmp_path):
-    # The whole point of the fix: a real run must be able to gather bindings
-    # from the SETUP page so validate() passes.
+    from sensorchrono.config import DeviceBindings
+
     w = MainWindow(_session(tmp_path, dry_run=False))
-    w.setup.shimmer_port.setCurrentText("COM7")
-    w.setup.camera_index.setCurrentText("2")
-    w.setup.mic_device.setCurrentText("(system default)")
+    w.setup._shimmer_list.add_row("COM7")
+    w.setup._camera_list.add_row("2")
+    # no mic added → empty list
     w.setup.apply_to(w._base_session)
     b = w._base_session.bindings
-    assert b.shimmer_com_port == "COM7"
-    assert b.shimmer_ecg_port == "COM7"
-    assert b.camera_index == 2
-    assert b.mic_device is None
+    assert b.shimmer_com_ports == ["COM7"]
+    assert b.camera_indices == [2]
+    assert b.mic_devices == []
     w._base_session.validate()  # real capture with bindings now validates
 
 
 def test_setup_bindings_group_disabled_in_dry_run(app, tmp_path):
     w = MainWindow(_session(tmp_path, dry_run=True))
     w.setup.load(w._base_session)
-    assert not w.setup.bindings_group.isEnabled()
+    assert not w.setup._hw_group.isEnabled()
     w.setup.dry_run.setChecked(False)
-    assert w.setup.bindings_group.isEnabled()
+    assert w.setup._hw_group.isEnabled()
 
 
 def test_setup_load_restores_saved_bindings(app, tmp_path):
@@ -89,13 +97,14 @@ def test_setup_load_restores_saved_bindings(app, tmp_path):
 
     saved = _session(
         tmp_path, dry_run=False,
-        bindings=DeviceBindings(shimmer_com_port="COM9", camera_index=1, mic_device=3),
+        bindings=DeviceBindings(shimmer_com_ports=["COM9"], camera_indices=[1],
+                                mic_devices=[3]),
     )
     w = MainWindow(_session(tmp_path))
     w.setup.load(saved)
-    assert w.setup.shimmer_port.currentText() == "COM9"
-    assert w.setup.camera_index.currentText() == "1"
-    assert w.setup._parse_mic(w.setup.mic_device.currentText()) == 3
+    assert w.setup._shimmer_list.get_values() == ["COM9"]
+    assert w.setup._camera_list.get_values() == ["1"]
+    assert w.setup._parse_mic(w.setup._mic_list.get_values()[0]) == 3
 
 
 def test_session_persist_round_trip(app, tmp_path, monkeypatch):
@@ -106,17 +115,19 @@ def test_session_persist_round_trip(app, tmp_path, monkeypatch):
     cfg = SessionConfig(
         participant="p01", session="s1", task="rest", duration_s=30,
         out_dir=tmp_path / "o", dry_run=False,
-        bindings=DeviceBindings(shimmer_com_port="COM3", camera_index=0),
+        bindings=DeviceBindings(shimmer_com_ports=["COM3"], camera_indices=[0]),
     )
     cfg.save(user_config_path())
     loaded = _load_or_default_session()
-    assert loaded.bindings.shimmer_com_port == "COM3"
-    assert loaded.bindings.camera_index == 0
+    assert loaded.bindings.shimmer_com_ports == ["COM3"]
+    assert loaded.bindings.camera_indices == [0]
     assert loaded.dry_run is False
 
 
 def test_invalid_config_keeps_setup_and_shows_error(app, tmp_path):
     w = MainWindow(_session(tmp_path))
+    w.splash.proceed.emit()
+    app.processEvents()
     w.setup.participant.setText("")  # empty -> ConfigError
     w.setup.started.emit()
     app.processEvents()
@@ -177,9 +188,9 @@ def test_liveview_plots_varying_ecg_channel_not_constant_ch0(app):
     # ch0 + ch1 constant (status), ch2 varies most, ch3 varies less — like a real
     # Shimmer ECG frame. The preview must pick the live channel, not the flat ch0.
     samples = [[1.0, 5.0, float(i % 7), float(i % 3)] for i in range(64)]
-    assert lv._pick_ecg_channel(samples) == 2
+    assert lv._pick_ecg_channel("ShimmerECG", samples) == 2
     # sticky: re-picks only if the chosen channel goes flat
-    assert lv._pick_ecg_channel(samples) == 2
+    assert lv._pick_ecg_channel("ShimmerECG", samples) == 2
 
 
 def test_widgets_render_without_error(app):
@@ -230,7 +241,7 @@ def test_recorded_xdf_picks_newest_under_out_dir(app, tmp_path):
     out.mkdir()
     w = MainWindow(_session(
         tmp_path, dry_run=False, out_dir=out,
-        bindings=DeviceBindings(shimmer_com_port="COM3", camera_index=0),
+        bindings=DeviceBindings(shimmer_com_ports=["COM3"], camera_indices=[0]),
     ))
     (out / "old.xdf").write_bytes(b"x")
     time.sleep(0.05)

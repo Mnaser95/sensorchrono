@@ -102,24 +102,23 @@ _PAGE_ORDER = [
 
 
 class LiveView(QtCore.QObject):
-    """Pull ECG/audio off LSL and push synthetic video into the staging widgets
+    """Pull all configured LSL streams and push data into the staging panel grid
     via a GUI-thread QTimer. Best-effort: degrades silently without pylsl."""
 
-    def __init__(self, page: LivenessPage, *, dry_run: bool, fps: int = 30,
-                 preview_path=None) -> None:
+    def __init__(self, page: "LivenessPage", *, dry_run: bool, fps: int = 30,
+                 preview_paths: dict | None = None) -> None:
         super().__init__()
         self._page = page
         self._dry_run = dry_run
-        self._preview_path = preview_path  # JPEG the camera bridge drops ~2x/s
+        # stream_name → Path of camera JPEG written by bridge ~2x/s
+        self._preview_paths: dict = preview_paths or {}
         self._timer = QtCore.QTimer(self)
         self._timer.setInterval(int(1000 / fps))
         self._timer.timeout.connect(self._tick)
         self._t0 = time.monotonic()
-        self._ecg = None
-        self._audio = None
-        self._video = None
-        self._ecg_ch: int | None = None  # which ECG channel actually carries signal
-        self._video_frames = 0
+        self._inlets: dict = {}          # stream_name → StreamInlet
+        self._ecg_ch: dict = {}          # stream_name → int (best channel index)
+        self._video_frames: dict = {}    # stream_name → int (frames seen)
 
     def start(self) -> None:
         self._resolve_inlets()
@@ -127,74 +126,127 @@ class LiveView(QtCore.QObject):
 
     def stop(self) -> None:
         self._timer.stop()
-        self._ecg = self._audio = self._video = None
+        self._inlets.clear()
 
     def _resolve_inlets(self) -> None:
         try:
             import pylsl
         except Exception:
             return
-        for name, attr in ((StreamName.SHIMMER_ECG, "_ecg"), (StreamName.AUDIO, "_audio"),
-                           (StreamName.VIDEO_FRAMES, "_video")):
-            found = pylsl.resolve_byprop("name", str(name), 1, 0.5)
+        if self._page.panels:
+            targets = set(self._page.panels.keys())
+        else:
+            targets = {str(StreamName.SHIMMER_ECG), str(StreamName.AUDIO),
+                       str(StreamName.VIDEO_FRAMES)}
+        for name in targets:
+            found = pylsl.resolve_byprop("name", name, 1, 0.5)
             if found:
-                setattr(self, attr, pylsl.StreamInlet(found[0], max_buflen=2))
+                self._inlets[name] = pylsl.StreamInlet(found[0], max_buflen=2)
 
-    def _pick_ecg_channel(self, samples) -> int:
-        """Choose the ECG channel that actually carries signal. A Shimmer ECG
-        stream pairs the live leads with constant status channels (e.g. ch0);
-        plotting ch0 looks flatlined even when the heart trace is fine. Lock onto
-        the highest-variance channel, re-picking only if it goes flat."""
+    def _pick_ecg_channel(self, stream_name: str, samples) -> int:
         import numpy as np
-
         stds = np.asarray(samples, dtype=float).std(axis=0)
-        if self._ecg_ch is None or self._ecg_ch >= len(stds) or stds[self._ecg_ch] < 1e-6:
-            self._ecg_ch = int(np.argmax(stds))
-        return self._ecg_ch
+        ch = self._ecg_ch.get(stream_name)
+        if ch is None or ch >= len(stds) or stds[ch] < 1e-6:
+            ch = int(np.argmax(stds))
+            self._ecg_ch[stream_name] = ch
+        return ch
 
     def _tick(self) -> None:
-        if self._ecg is not None:
-            samples, _ = self._ecg.pull_chunk(timeout=0.0, max_samples=512)
-            if samples:
-                ch = self._pick_ecg_channel(samples)
-                self._page.waveform.append([row[ch] for row in samples])
-        if self._audio is not None:
-            samples, _ = self._audio.pull_chunk(timeout=0.0, max_samples=4096)
-            if samples:
-                import numpy as np
+        if self._page.panels:
+            self._tick_configured()
+        else:
+            self._tick_default()
 
-                rms = float(np.sqrt(np.mean(np.square(np.asarray(samples, dtype=float)))))
+    def _tick_configured(self) -> None:
+        import numpy as np
+        t = time.monotonic() - self._t0
+        for sname, panel_list in self._page.panels.items():
+            kind0 = panel_list[0][1] if panel_list else ""
+            if kind0 == "video":
+                if self._dry_run:
+                    frame = synthetic_frame(t)
+                    for w, _ in panel_list:
+                        w.set_frame(frame)
+                else:
+                    path = self._preview_paths.get(sname)
+                    for w, _ in panel_list:
+                        shown = False
+                        if path is not None:
+                            try:
+                                import os, time as _t
+                                p = str(path)
+                                if os.path.exists(p) and (_t.time() - os.path.getmtime(p)) < 3.0:
+                                    shown = w.show_image_file(p)
+                            except Exception:
+                                pass
+                        if not shown:
+                            n = self._video_frames.get(sname, 0)
+                            w.show_status(f"● Recording\n{n} frames\n(preview starting…)")
+                    inlet = self._inlets.get(sname)
+                    if inlet:
+                        frames, _ = inlet.pull_chunk(timeout=0.0, max_samples=512)
+                        if frames:
+                            self._video_frames[sname] = (
+                                self._video_frames.get(sname, 0) + len(frames))
+                continue
+            inlet = self._inlets.get(sname)
+            if inlet is None:
+                continue
+            samples, _ = inlet.pull_chunk(timeout=0.0, max_samples=4096)
+            if not samples:
+                continue
+            for w, kind in panel_list:
+                if kind == "ecg":
+                    ch = self._pick_ecg_channel(sname, samples)
+                    w.append([row[ch] for row in samples])
+                elif kind == "audio_level":
+                    rms = float(np.sqrt(np.mean(np.square(
+                        np.asarray(samples, dtype=float)))))
+                    w.set_level(min(1.0, rms * 4))
+                elif kind == "audio_wave":
+                    arr = np.asarray(samples, dtype=float)[:, 0]
+                    w.append(arr.tolist())
+
+    def _tick_default(self) -> None:
+        """Legacy single-device tick (configure() not called)."""
+        import numpy as np
+        ecg_inlet = self._inlets.get("ShimmerECG")
+        if ecg_inlet is not None:
+            samples, _ = ecg_inlet.pull_chunk(timeout=0.0, max_samples=512)
+            if samples:
+                ch = self._pick_ecg_channel("ShimmerECG", samples)
+                self._page.waveform.append([row[ch] for row in samples])
+        audio_inlet = self._inlets.get("Audio")
+        if audio_inlet is not None:
+            samples, _ = audio_inlet.pull_chunk(timeout=0.0, max_samples=4096)
+            if samples:
+                rms = float(np.sqrt(np.mean(np.square(
+                    np.asarray(samples, dtype=float)))))
                 self._page.meter.set_level(min(1.0, rms * 4))
         if self._dry_run:
-            # Dry-run has no real camera: a moving synthetic pattern gives the
-            # staging page something to show.
             self._page.preview.set_frame(synthetic_frame(time.monotonic() - self._t0))
         else:
-            # Real capture: the recording bridge holds the camera exclusively, so
-            # the GUI can't open it. The bridge instead drops a small JPEG ~2x/s;
-            # show it for a genuine live view, falling back to a status line until
-            # the first snapshot lands (or if it goes stale).
-            if self._video is not None:
-                frames, _ = self._video.pull_chunk(timeout=0.0, max_samples=512)
+            video_inlet = self._inlets.get("VideoFrames")
+            if video_inlet is not None:
+                frames, _ = video_inlet.pull_chunk(timeout=0.0, max_samples=512)
                 if frames:
-                    self._video_frames += len(frames)
+                    self._video_frames["VideoFrames"] = (
+                        self._video_frames.get("VideoFrames", 0) + len(frames))
+            path = next(iter(self._preview_paths.values()), None)
             shown = False
-            if self._preview_path is not None:
+            if path is not None:
                 try:
-                    import os
-                    import time as _time
-
-                    p = str(self._preview_path)
-                    if os.path.exists(p) and (_time.time() - os.path.getmtime(p)) < 3.0:
+                    import os, time as _t
+                    p = str(path)
+                    if os.path.exists(p) and (_t.time() - os.path.getmtime(p)) < 3.0:
                         shown = self._page.preview.show_image_file(p)
                 except Exception:
-                    shown = False
+                    pass
             if not shown:
+                n = self._video_frames.get("VideoFrames", 0)
                 self._page.preview.show_status(
-                    "● Recording to file\n"
-                    f"{self._video_frames} frames captured\n"
-                    "(camera preview starting…)"
-                )
+                    f"● Recording to file\n{n} frames captured\n(camera preview starting…)")
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -275,9 +327,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
             fleet = default_simulated_fleet()
         else:
-            from sensorchrono.devices.bridge_adapter import default_real_fleet
+            from sensorchrono.devices.bridge_adapter import build_real_fleet
 
-            fleet = default_real_fleet()
+            fleet = build_real_fleet(session)
         expected = [s.name for a in fleet for s in a.streams()]
         self._monitor = LslMonitor(expected)
         recorder, launcher, rcs_port = self._make_recorder(session)
@@ -442,8 +494,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._base_session.dry_run:
             return None
         from sensorchrono.devices.camera import CameraAdapter
-
-        p = CameraAdapter().mp4_path(self._base_session)
+        # Return primary (fleet_idx=0) camera's MP4; analysis uses the first camera.
+        p = CameraAdapter(fleet_idx=0).mp4_path(self._base_session)
         return p if p.exists() else None
 
     def _restart(self) -> None:
@@ -504,14 +556,20 @@ class MainWindow(QtWidgets.QMainWindow):
     # -- live feed + key capture -------------------------------------------
     def _start_live(self) -> None:
         if self._live is not None:
-            self._live.stop()  # recreate per session so the preview path is current
-        preview_path = None
+            self._live.stop()
+        # Configure the panel grid from the session's display layout
+        self.liveness.configure(self._base_session.bindings.display_grid)
+        # Build JPEG preview paths for each camera in the fleet
+        preview_paths: dict = {}
         if not self._base_session.dry_run:
             from sensorchrono.devices.camera import CameraAdapter
-
-            preview_path = CameraAdapter().preview_path(self._base_session)
+            for idx in range(len(self._base_session.bindings.camera_indices)):
+                cam = CameraAdapter(fleet_idx=idx)
+                sname = "VideoFrames" if idx == 0 else f"VideoFrames_{idx}"
+                preview_paths[sname] = cam.preview_path(self._base_session)
         self._live = LiveView(
-            self.liveness, dry_run=self._base_session.dry_run, preview_path=preview_path
+            self.liveness, dry_run=self._base_session.dry_run,
+            preview_paths=preview_paths,
         )
         self._live.start()
 

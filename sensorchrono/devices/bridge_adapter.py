@@ -125,11 +125,35 @@ class BridgeAdapter(DeviceAdapter):
 
 
 def default_real_fleet(*, shimmer_mode: str = "ecg") -> list[DeviceAdapter]:
-    """The proven v1 core driving the real bridges. Lazy imports avoid a
-    module-load cycle (the adapter modules import this one)."""
+    """Single-device fleet for backward compat. Prefer build_real_fleet(session)."""
     from sensorchrono.devices.camera import CameraAdapter
     from sensorchrono.devices.keyboard import KeyboardAdapter
     from sensorchrono.devices.microphone import MicrophoneAdapter
     from sensorchrono.devices.shimmer_exg import ShimmerExgAdapter
 
     return [ShimmerExgAdapter(mode=shimmer_mode), CameraAdapter(), MicrophoneAdapter(), KeyboardAdapter()]
+
+
+def build_real_fleet(session, *, shimmer_mode: str = "ecg") -> list[DeviceAdapter]:
+    """Build a fleet from :class:`~sensorchrono.config.SessionConfig`, supporting
+    N Shimmers, M cameras, and K microphones as configured by the operator."""
+    from sensorchrono.devices.camera import CameraAdapter
+    from sensorchrono.devices.keyboard import KeyboardAdapter
+    from sensorchrono.devices.microphone import MicrophoneAdapter
+    from sensorchrono.devices.shimmer_exg import ShimmerExgAdapter
+
+    adapters: list[DeviceAdapter] = []
+    b = session.bindings
+
+    for idx, port in enumerate(b.shimmer_com_ports):
+        adapters.append(ShimmerExgAdapter(com_port=port, fleet_idx=idx, mode=shimmer_mode))
+
+    for idx, cam_idx in enumerate(b.camera_indices):
+        adapters.append(CameraAdapter(camera_device_idx=cam_idx, fleet_idx=idx))
+
+    for idx, dev in enumerate(b.mic_devices):
+        adapters.append(MicrophoneAdapter(device=(dev if dev is not None else None),
+                                          fleet_idx=idx))
+
+    adapters.append(KeyboardAdapter())
+    return adapters

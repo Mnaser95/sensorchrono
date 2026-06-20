@@ -80,7 +80,7 @@ def test_environment_snapshot_includes_bindings(tmp_path, monkeypatch):
     cfg = SessionConfig(
         participant="p", session="s", task="t", duration_s=30,
         out_dir=tmp_path / "o", dry_run=False,
-        bindings=DeviceBindings(shimmer_com_port="COM3", camera_index=0),
+        bindings=DeviceBindings(shimmer_com_ports=["COM3"], camera_indices=[0]),
     )
     diagnostics_log.log_environment_snapshot(cfg)
     text = _read_log(out)

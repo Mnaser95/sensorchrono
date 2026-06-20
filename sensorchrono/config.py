@@ -79,13 +79,18 @@ def _creatable(target: Path) -> tuple[bool, str]:
 
 @dataclass(slots=True)
 class DeviceBindings:
-    """Machine-specific hardware bindings — set once by the admin, saved in
-    ``config.yaml``. ``None`` means "not bound yet"."""
+    """Machine-specific hardware bindings — configured once by the admin, saved in
+    ``config.yaml``. All device lists support N devices of each type.
 
-    shimmer_com_port: str | None = None  # Windows COM port for the Shimmer (BT RFCOMM)
-    shimmer_ecg_port: str | None = None  # value passed to the bridge --ecg-port (often the COM port)
-    camera_index: int | None = None  # cv2 / video bridge --device
-    mic_device: str | int | None = None  # sounddevice id or name for the audio bridge
+    Backward compat: v1 configs used single-device fields
+    (``shimmer_com_port``, ``camera_index``, ``mic_device``).  These are
+    automatically migrated to lists in :meth:`SessionConfig.__post_init__`.
+    """
+
+    shimmer_com_ports: list = field(default_factory=list)   # list[str]  — COM ports
+    camera_indices: list = field(default_factory=list)      # list[int]  — cv2 device indices
+    mic_devices: list = field(default_factory=list)         # list[str | int] — sounddevice ids
+    display_grid: list = field(default_factory=list)        # list[list[str]] — 2-D panel layout
 
 
 @dataclass(slots=True)
@@ -107,7 +112,23 @@ class SessionConfig:
         if not isinstance(self.out_dir, Path):
             self.out_dir = Path(self.out_dir)
         if isinstance(self.bindings, dict):
-            self.bindings = DeviceBindings(**self.bindings)
+            d = dict(self.bindings)
+            # Migrate v1 single-device keys → v2 list-based keys
+            if "shimmer_com_port" in d or "shimmer_ecg_port" in d:
+                port = d.pop("shimmer_com_port", None) or d.pop("shimmer_ecg_port", None)
+                d.pop("shimmer_com_port", None)
+                d.pop("shimmer_ecg_port", None)
+                if "shimmer_com_ports" not in d:
+                    d["shimmer_com_ports"] = [port] if port else []
+            if "camera_index" in d:
+                cam = d.pop("camera_index")
+                if "camera_indices" not in d:
+                    d["camera_indices"] = [cam] if cam is not None else []
+            if "mic_device" in d:
+                mic = d.pop("mic_device")
+                if "mic_devices" not in d:
+                    d["mic_devices"] = [mic] if mic is not None else []
+            self.bindings = DeviceBindings(**d)
 
     # -- validation ---------------------------------------------------------
     def validate(self) -> None:
@@ -143,10 +164,10 @@ class SessionConfig:
             errs.append(f"out_dir={self.out_dir} is not creatable: {why}")
 
         if not self.dry_run:
-            if not self.bindings.shimmer_com_port:
-                errs.append("real capture requires bindings.shimmer_com_port")
-            if self.bindings.camera_index is None:
-                errs.append("real capture requires bindings.camera_index")
+            if not self.bindings.shimmer_com_ports:
+                errs.append("real capture requires at least one Shimmer COM port")
+            if not self.bindings.camera_indices:
+                errs.append("real capture requires at least one camera")
 
         if errs:
             raise ConfigError("Invalid session config:\n  - " + "\n  - ".join(errs))
