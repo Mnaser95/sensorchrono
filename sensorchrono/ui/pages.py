@@ -8,6 +8,7 @@ from PySide6 import QtCore, QtWidgets
 
 from sensorchrono.config import DeviceBindings
 from sensorchrono.orchestration import device_scan
+from sensorchrono.ui.theme import GOLD
 from sensorchrono.ui.video_preview import VideoPreview
 from sensorchrono.ui.waveform import AudioLevelMeter, WaveformWidget
 
@@ -16,6 +17,16 @@ _WARN = "!"
 _FAIL = "✗"
 
 _MIC_DEFAULT = "(system default)"
+
+
+def _heading(step: str, subtitle: str) -> QtWidgets.QLabel:
+    """Styled page heading: gold step title + muted white subtitle."""
+    lbl = QtWidgets.QLabel(
+        f"<span style='color:{GOLD};font-size:15px;font-weight:bold;'>{step}</span><br>"
+        f"<span style='color:#AAAAAA;font-size:12px;'>{subtitle}</span>")
+    lbl.setTextFormat(QtCore.Qt.TextFormat.RichText)
+    lbl.setContentsMargins(4, 6, 4, 6)
+    return lbl
 
 
 class SetupPage(QtWidgets.QWidget):
@@ -44,16 +55,15 @@ class SetupPage(QtWidgets.QWidget):
         self.bindings_group = self._build_bindings_group()
 
         self.error = QtWidgets.QLabel()
-        self.error.setStyleSheet("color:#d44;")
+        self.error.setStyleSheet("color:#C0392B;font-weight:600;")
         self.error.setWordWrap(True)
         start = QtWidgets.QPushButton("Start session →")
         start.clicked.connect(self.started.emit)
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(QtWidgets.QLabel(
-            "<h2>Step 1 · Set up recording</h2>"
-            "<span style='color:#888'>Connect your devices, fill in the labels, pick the "
-            "hardware bindings below, then <b>Start session →</b></span>"))
+        lay.addWidget(_heading(
+            "Step 1 · Set up recording",
+            "Connect your devices, fill in the labels, pick the hardware bindings, then Start session →"))
         lay.addLayout(form)
         lay.addWidget(self.bindings_group)
         lay.addWidget(self.error)
@@ -177,6 +187,7 @@ class PreflightPage(QtWidgets.QWidget):
         self._proceed.setEnabled(False)
         self._proceed.clicked.connect(self.proceed.emit)
         rescan = QtWidgets.QPushButton("Rescan")
+        rescan.setProperty("role", "secondary")
         rescan.clicked.connect(self.rescan.emit)
 
         buttons = QtWidgets.QHBoxLayout()
@@ -185,10 +196,9 @@ class PreflightPage(QtWidgets.QWidget):
         buttons.addWidget(self._proceed)
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(QtWidgets.QLabel(
-            "<h2>Step 2 · Preflight — are the devices responding?</h2>"
-            "<span style='color:#888'>Each device is opened and checked. Fix any ✗ (a warning ! is OK), "
-            "then <b>Proceed to staging →</b></span>"))
+        lay.addWidget(_heading(
+            "Step 2 · Preflight — are the devices responding?",
+            "Each device is opened and checked. Fix any ✗ (a warning ! is OK), then Proceed to staging →"))
         lay.addWidget(self.list)
         lay.addLayout(buttons)
 
@@ -229,10 +239,9 @@ class LivenessPage(QtWidgets.QWidget):
         self._go.clicked.connect(self.go_record.emit)
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(QtWidgets.QLabel(
-            "<h2>Step 3 · Staging — every stream live and healthy?</h2>"
-            "<span style='color:#888'>Watch the live ECG trace + camera preview. When all streams read "
-            "OK, <b>Go to Recording →</b></span>"))
+        lay.addWidget(_heading(
+            "Step 3 · Staging — every stream live and healthy?",
+            "Watch the live ECG trace + camera preview. When all streams read OK, Go to Recording →"))
         lay.addLayout(split)
         lay.addWidget(self._go, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
 
@@ -262,6 +271,7 @@ class CalibratePage(QtWidgets.QWidget):
         self._done.setEnabled(False)
         self._done.clicked.connect(lambda: self.done_calibration.emit(False))
         fallback = QtWidgets.QPushButton("Skip / accept fallback (uncalibrated) →")
+        fallback.setProperty("role", "secondary")
         fallback.clicked.connect(lambda: self.done_calibration.emit(True))
 
         buttons = QtWidgets.QHBoxLayout()
@@ -270,10 +280,9 @@ class CalibratePage(QtWidgets.QWidget):
         buttons.addWidget(self._done)
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(QtWidgets.QLabel(
-            "<h2>Step 4 · Calibration block</h2>"
-            "<span style='color:#888'>These taps anchor the audio/video lag measurement. "
-            "Then <b>Calibrated — start recording →</b></span>"))
+        lay.addWidget(_heading(
+            "Step 4 · Calibration block",
+            "Tap the spacebar firmly ~15 times (~2 s apart). These anchor the audio/video lag measurement."))
         lay.addWidget(hint)
         lay.addStretch(1)
         lay.addWidget(self.count_label)
@@ -299,13 +308,13 @@ class RecordPage(QtWidgets.QWidget):
         self.status = QtWidgets.QLabel("")
         self.status.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         stop = QtWidgets.QPushButton("Stop recording")
+        stop.setProperty("role", "danger")
         stop.clicked.connect(self.stop_record.emit)
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(QtWidgets.QLabel(
-            "<h2>Step 5 · Recording</h2>"
-            "<span style='color:#888'>Capturing all streams. Leave the devices in place; it stops "
-            "automatically at the set duration (or press Stop).</span>"))
+        lay.addWidget(_heading(
+            "Step 5 · Recording",
+            "Capturing all streams. Leave the devices in place — stops automatically, or press Stop."))
         lay.addStretch(1)
         lay.addWidget(self.countdown)
         lay.addWidget(self.status)
@@ -339,9 +348,9 @@ class DonePage(QtWidgets.QWidget):
         buttons.addWidget(another)
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(QtWidgets.QLabel(
-            "<h2>Step 7 · Done — your aligned dataset is ready</h2>"
-            "<span style='color:#888'>Your cleansed, time-aligned files are in the output folder.</span>"))
+        lay.addWidget(_heading(
+            "Step 7 · Done — your aligned dataset is ready",
+            "Drift-corrected, lag-calibrated files are in the output folder."))
         lay.addWidget(self.summary)
         lay.addWidget(self.out_dir_label)
         lay.addStretch(1)
@@ -380,6 +389,7 @@ class ErrorPage(QtWidgets.QWidget):
         retry = QtWidgets.QPushButton("Retry")
         retry.clicked.connect(self.retry.emit)
         abort = QtWidgets.QPushButton("Abort")
+        abort.setProperty("role", "danger")
         abort.clicked.connect(self.abort.emit)
         # The full diagnostic detail (per-bridge ACK/TIMEOUT logs, COM-port
         # enumeration) lives on disk — give the operator one click to it so a
@@ -393,7 +403,8 @@ class ErrorPage(QtWidgets.QWidget):
         buttons.addWidget(retry)
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(QtWidgets.QLabel("<h2>Something went wrong</h2>"))
+        lay.addWidget(_heading("Something went wrong",
+                               "Check the error below and the log folder for details."))
         lay.addWidget(self.message)
         lay.addStretch(1)
         lay.addLayout(buttons)

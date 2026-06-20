@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 import functools
 
@@ -31,7 +31,67 @@ from sensorchrono.ui.pages import (
     RecordPage,
     SetupPage,
 )
+from sensorchrono.ui.theme import APP_STYLESHEET, GOLD
 from sensorchrono.ui.video_preview import synthetic_frame
+
+
+_ASSETS = Path(__file__).parent / "assets"
+
+
+class _BrandHeader(QtWidgets.QWidget):
+    """Permanent top banner: KSU logo · SensorChrono · institution · license."""
+
+    _H = 70
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(self._H)
+        self.setAutoFillBackground(True)
+        pal = self.palette()
+        pal.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor("#000000"))
+        self.setPalette(pal)
+
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(18, 8, 20, 8)
+        lay.setSpacing(14)
+
+        # Logo (falls back to text if PNG not yet placed in assets/)
+        logo_lbl = QtWidgets.QLabel()
+        logo_path = _ASSETS / "ksu_logo.png"
+        if logo_path.exists():
+            pix = QtGui.QPixmap(str(logo_path)).scaledToHeight(
+                self._H - 16, QtCore.Qt.TransformationMode.SmoothTransformation)
+            logo_lbl.setPixmap(pix)
+        else:
+            logo_lbl.setText(
+                f"<span style='color:{GOLD};font-size:20px;font-weight:bold;'>"
+                f"KSU</span>")
+        lay.addWidget(logo_lbl)
+
+        # Vertical divider
+        div = QtWidgets.QFrame()
+        div.setFrameShape(QtWidgets.QFrame.Shape.VLine)
+        div.setStyleSheet("color:#444;")
+        lay.addWidget(div)
+
+        # App name + institution
+        name = QtWidgets.QLabel(
+            f"<span style='color:{GOLD};font-size:17px;font-weight:bold;"
+            f"letter-spacing:1px;'>SensorChrono</span><br>"
+            f"<span style='color:#FFFFFF;font-size:11px;'>"
+            f"Kennesaw State University"
+            f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+            f"Center for Cyber Physical Realms</span>")
+        name.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        lay.addWidget(name)
+
+        lay.addStretch(1)
+
+        # MIT license tag
+        lic = QtWidgets.QLabel(
+            "<span style='color:#888;font-size:10px;'>MIT License</span>")
+        lic.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        lay.addWidget(lic)
 
 _PAGE_ORDER = [
     SessionState.SETUP, SessionState.PREFLIGHT, SessionState.LIVENESS,
@@ -139,7 +199,7 @@ class LiveView(QtCore.QObject):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, session: SessionConfig, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("SensorChrono")
+        self.setWindowTitle("SensorChrono — KSU Center for Cyber Physical Realms")
         self._base_session = session
         self.controller: SessionController | None = None
         self._monitor: LslMonitor | None = None
@@ -153,9 +213,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calibrate = CalibratePage()
         self.record = RecordPage()
         self.postprocess = QtWidgets.QLabel(
-            "Step 6 · Aligning & cleaning your dataset…\n(drift correction + lag subtraction)",
+            f"<span style='color:{GOLD};font-size:16px;font-weight:bold;'>"
+            f"Step 6 · Aligning &amp; cleaning your dataset…</span><br>"
+            f"<span style='color:#AAAAAA;'>Drift correction · lag subtraction · sync validation</span>",
             alignment=QtCore.Qt.AlignmentFlag.AlignCenter,
         )
+        self.postprocess.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self.done = DonePage()
         self.error = ErrorPage()
         self._pages = {
@@ -167,7 +230,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack = QtWidgets.QStackedWidget()
         for st in _PAGE_ORDER:
             self.stack.addWidget(self._pages[st])
-        self.setCentralWidget(self.stack)
+
+        # Wrap header + stack in one container so the black banner spans the window
+        container = QtWidgets.QWidget()
+        vbox = QtWidgets.QVBoxLayout(container)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+        vbox.addWidget(_BrandHeader())
+        vbox.addWidget(self.stack)
+        self.setCentralWidget(container)
         self.statusBar().showMessage("ready")
 
         # page → controller wiring
@@ -478,8 +549,9 @@ def run(argv: list[str] | None = None) -> int:
     import sys
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv if argv is None else argv)
+    app.setStyleSheet(APP_STYLESHEET)
     session = _load_or_default_session()
     win = MainWindow(session)
-    win.resize(960, 640)
+    win.resize(980, 720)
     win.show()
     return app.exec()
