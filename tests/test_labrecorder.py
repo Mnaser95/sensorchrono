@@ -26,9 +26,10 @@ def _session():
 
 
 def test_filename_command_template():
-    assert build_filename_command(_session(), run=2) == (
-        "filename {root:sensorchrono}{task:rest}{participant:p01}{session:s1}{run:2}"
-    )
+    # run=1 -> flat name, no _R suffix
+    assert build_filename_command(_session()) == "filename {template:p01_s1_rest}"
+    # run>1 -> append _R<n> so re-runs don't overwrite each other
+    assert build_filename_command(_session(), run=2) == "filename {template:p01_s1_rest_R2}"
 
 
 class _FakeRcsServer:
