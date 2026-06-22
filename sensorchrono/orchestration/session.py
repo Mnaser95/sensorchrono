@@ -11,6 +11,8 @@ the simulated fleet + fakes — no Qt, no hardware, no LabRecorder.
 """
 from __future__ import annotations
 
+import json
+import time
 from enum import StrEnum
 from pathlib import Path
 from typing import Callable
@@ -38,6 +40,14 @@ class SessionState(StrEnum):
 
 class InvalidTransition(RuntimeError):
     pass
+
+
+def _lsl_now() -> float:
+    try:
+        from pylsl import local_clock
+        return float(local_clock())
+    except Exception:
+        return time.monotonic()
 
 
 class SessionController:
@@ -98,6 +108,21 @@ class SessionController:
             raise InvalidTransition(
                 f"action not allowed in state {self.state}; expected one of {[s.value for s in states]}"
             )
+
+    def _mark_phase(self, name: str, *, reset: bool = False) -> None:
+        """Persist an LSL-clock phase boundary for post-processing."""
+        try:
+            path = Path(self.session.out_dir) / "phase_boundaries.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = {}
+            if not reset and path.exists():
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    data = loaded
+            data[name] = _lsl_now()
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception as exc:
+            self.progress.emit(f"could not write phase boundary {name}: {exc}")
 
     def _teardown_capture(self) -> list[str]:
         """Stop the monitor, recorder, and device fleet — each guarded so one
@@ -215,6 +240,7 @@ class SessionController:
             )
         if self._recorder is not None:
             self._recorder.start(self.session)  # recording begins (incl. calibration block)
+        self._mark_phase("calibration_start_lsl", reset=True)
         self._fiducial.reset()
         self._goto(SessionState.CALIBRATE)
 
@@ -238,6 +264,7 @@ class SessionController:
                 f"insufficient fiducials ({self._fiducial.count}/{self._fiducial.min_count}); "
                 "retry or accept-fallback"
             )
+        self._mark_phase("experiment_start_lsl")
         self._goto(SessionState.RECORD)
 
     def stop_recording(self, *, xdf_path: Path | None = None, mp4_path: Path | None = None) -> None:
@@ -252,6 +279,7 @@ class SessionController:
         """Stop the fleet + recorder and enter POSTPROCESS. Fast (no analysis),
         so the GUI can paint the progress page before :meth:`finish` blocks."""
         self._require(SessionState.RECORD)
+        self._mark_phase("experiment_end_lsl")
         errors = self._teardown_capture()
         if errors:
             self.progress.emit("teardown issues: " + "; ".join(errors))

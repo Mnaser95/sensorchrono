@@ -12,7 +12,7 @@
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 ROOT = Path(os.environ.get("SENSORCHRONO_ROOT", os.path.abspath(os.path.join(SPECPATH, "..")))).resolve()
 
@@ -48,7 +48,13 @@ else:
     print("WARNING [spec]: LABRECORDER_DIR not set/found — LabRecorder will NOT be bundled.")
 
 # --- hidden imports (the app imports many submodules lazily) -----------------
-hiddenimports = collect_submodules("sensorchrono")
+# imageio-ffmpeg ships its own ffmpeg executable; collect_all keeps audio muxing
+# available in the frozen desktop build without a system FFmpeg installation.
+ffmpeg_datas, ffmpeg_binaries, ffmpeg_hidden = collect_all("imageio_ffmpeg")
+datas += ffmpeg_datas
+binaries += ffmpeg_binaries
+
+hiddenimports = collect_submodules("sensorchrono") + ffmpeg_hidden
 if (ROOT / "analysis").exists():
     hiddenimports += collect_submodules("analysis")
 

@@ -119,8 +119,10 @@ class SplashPage(QtWidgets.QWidget):
 
         inst = QtWidgets.QLabel(
             f"<span style='color:{WHITE};font-size:12px;'>"
-            f"Kennesaw State University &nbsp;·&nbsp; "
-            f"Center for Cyber Physical Realms</span>")
+            f"A multi-modal platform for running human subject experiments &nbsp;·&nbsp; "
+            f"</span>"
+        )
+
         inst.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         inst.setTextFormat(QtCore.Qt.TextFormat.RichText)
         lay.addWidget(inst)
@@ -151,7 +153,7 @@ class SplashPage(QtWidgets.QWidget):
         lay.addSpacing(20)
 
         # ── Get Started button ────────────────────────────────────────────
-        start = QtWidgets.QPushButton("Get Started →")
+        start = QtWidgets.QPushButton("Get Started")
         start.setFixedHeight(40)
         start.setFixedWidth(200)
         start.clicked.connect(self.proceed.emit)
@@ -297,6 +299,33 @@ class SetupPage(QtWidgets.QWidget):
             "Microphones",
             lambda: self._avail_mics, editable=True)
 
+
+        self._emotiv_enabled = QtWidgets.QCheckBox(
+            "Enable EMOTIV headset through EMOTIV Launcher")
+        self._emotiv_headset = QtWidgets.QLineEdit()
+        self._emotiv_headset.setPlaceholderText(
+            "Headset ID (optional; blank auto-discovers)")
+        self._emotiv_credentials = QtWidgets.QLineEdit()
+        self._emotiv_credentials.setPlaceholderText(
+            "credentials.txt (or use EMOTIV_CLIENT_ID/SECRET)")
+        emotiv_browse = QtWidgets.QPushButton("Browse...")
+        emotiv_browse.setProperty("role", "secondary")
+        emotiv_browse.clicked.connect(self._browse_emotiv_credentials)
+        credential_row = QtWidgets.QHBoxLayout()
+        credential_row.addWidget(self._emotiv_credentials, 1)
+        credential_row.addWidget(emotiv_browse)
+        emotiv_fields = QtWidgets.QWidget()
+        emotiv_form = QtWidgets.QFormLayout(emotiv_fields)
+        emotiv_form.setContentsMargins(8, 2, 0, 2)
+        emotiv_form.addRow("Headset", self._emotiv_headset)
+        emotiv_form.addRow("Cortex app credentials", credential_row)
+        self._emotiv_group = QtWidgets.QGroupBox("EMOTIV Cortex")
+        emotiv_layout = QtWidgets.QVBoxLayout(self._emotiv_group)
+        emotiv_layout.addWidget(self._emotiv_enabled)
+        emotiv_layout.addWidget(emotiv_fields)
+        emotiv_fields.setEnabled(False)
+        self._emotiv_enabled.toggled.connect(emotiv_fields.setEnabled)
+        self._emotiv_enabled.toggled.connect(self._refresh_display_options)
         self._shimmer_list.changed.connect(self._refresh_display_options)
         self._camera_list.changed.connect(self._refresh_display_options)
         self._mic_list.changed.connect(self._refresh_display_options)
@@ -308,6 +337,7 @@ class SetupPage(QtWidgets.QWidget):
         hw.addWidget(self._shimmer_list)
         hw.addWidget(self._camera_list)
         hw.addWidget(self._mic_list)
+        hw.addWidget(self._emotiv_group)
 
         # ── Display layout ────────────────────────────────────────────────
         self._display_group = self._build_display_group()
@@ -395,6 +425,8 @@ class SetupPage(QtWidgets.QWidget):
         for i in range(len(self._mic_list.get_values())):
             opts.append((f"Audio level: Mic {i + 1}", f"audio_level:{i}"))
             opts.append((f"Audio waveform: Mic {i + 1}", f"audio_wave:{i}"))
+        if self._emotiv_enabled.isChecked():
+            opts.append(("EEG: EMOTIV", "emotiv_eeg:0"))
         return opts
 
     def _rebuild_display_grid(self) -> None:
@@ -486,6 +518,11 @@ class SetupPage(QtWidgets.QWidget):
             shimmer_com_ports=shimmer_ports,
             camera_indices=camera_indices,
             mic_devices=mic_devices,
+            emotiv_enabled=self._emotiv_enabled.isChecked(),
+            emotiv_headset_id=self._emotiv_headset.text().strip() or None,
+            emotiv_credentials_file=(
+                self._emotiv_credentials.text().strip() or None
+            ),
             display_grid=display_grid,
         )
 
@@ -495,6 +532,14 @@ class SetupPage(QtWidgets.QWidget):
             self, "Choose output folder", current)
         if chosen:
             self.out_dir.setText(chosen)
+
+    def _browse_emotiv_credentials(self) -> None:
+        current = self._emotiv_credentials.text().strip() or str(Path.home())
+        chosen, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Choose EMOTIV credentials file", current,
+            "Text files (*.txt);;All files (*)")
+        if chosen:
+            self._emotiv_credentials.setText(chosen)
 
     def _on_dry_run_toggled(self, checked: bool) -> None:
         self._hw_group.setEnabled(not checked)
@@ -521,6 +566,10 @@ class SetupPage(QtWidgets.QWidget):
         for dev in b.mic_devices:
             self._mic_list.add_row(
                 f"{dev}" if dev is not None else _MIC_DEFAULT)
+
+        self._emotiv_enabled.setChecked(bool(b.emotiv_enabled))
+        self._emotiv_headset.setText(b.emotiv_headset_id or "")
+        self._emotiv_credentials.setText(b.emotiv_credentials_file or "")
 
         if b.display_grid:
             nrows = len(b.display_grid)
@@ -585,6 +634,7 @@ class PreflightPage(QtWidgets.QWidget):
         "shimmer_serial": "Physiological sensor 1",
         "camera": "Camera 1",
         "microphone": "Microphone 1",
+        "emotiv_cortex": "EMOTIV Launcher / Cortex",
         "labrecorder_rcs": "LabRecorder",
         "dry_run": "Simulation mode",
     }
@@ -606,8 +656,9 @@ class LivenessPage(QtWidgets.QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.table = QtWidgets.QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["stream", "rate (Hz)", "ch", "ok"])
+        self.table = QtWidgets.QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(
+            ["stream", "rate (Hz)", "ch", "ok", "details"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setMinimumWidth(680)
@@ -672,6 +723,7 @@ class LivenessPage(QtWidgets.QWidget):
                 stream_name = {
                     "video": "VideoFrames" if idx == 0 else f"VideoFrames_{idx}",
                     "ecg": "ShimmerECG" if idx == 0 else f"ShimmerECG_{idx}",
+                    "emotiv_eeg": "EmotivEEG",
                     "audio_level": "Audio" if idx == 0 else f"Audio_{idx}",
                     "audio_wave": "Audio" if idx == 0 else f"Audio_{idx}",
                 }.get(kind)
@@ -681,8 +733,15 @@ class LivenessPage(QtWidgets.QWidget):
                     w = VideoPreview()
                     if idx == 0:
                         self.preview = w
-                elif kind == "ecg":
-                    w = WaveformWidget()
+                elif kind in ("ecg", "emotiv_eeg"):
+                    if kind == "emotiv_eeg":
+                        w = WaveformWidget(
+                            buffer_n=1280, y_range=(-100.0, 100.0),
+                            y_label="EEG (uV)",
+                        )
+                        w.set_signal_name("Channel 1 - BPF 1-50 Hz")
+                    else:
+                        w = WaveformWidget()
                     if idx == 0:
                         self.waveform = w
                 elif kind in ("audio_level", "audio_wave"):
@@ -697,8 +756,13 @@ class LivenessPage(QtWidgets.QWidget):
     def update_report(self, report) -> None:
         self.table.setRowCount(len(report.streams))
         for i, s in enumerate(report.streams):
-            cells = [str(s.name), f"{s.measured_rate_hz:.0f}/{s.expected_rate_hz:.0f}",
-                     f"{s.measured_channels}/{s.expected_channels}", _OK if s.ok else _FAIL]
+            cells = [
+                str(s.name),
+                f"{s.measured_rate_hz:.0f}/{s.expected_rate_hz:.0f}",
+                f"{s.measured_channels}/{s.expected_channels}",
+                _OK if s.ok else _FAIL,
+                s.note or "healthy",
+            ]
             for j, text in enumerate(cells):
                 self.table.setItem(i, j, QtWidgets.QTableWidgetItem(text))
         self._go.setEnabled(report.ok)

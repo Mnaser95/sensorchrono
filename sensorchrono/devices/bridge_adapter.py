@@ -138,6 +138,7 @@ def build_real_fleet(session, *, shimmer_mode: str = "ecg") -> list[DeviceAdapte
     """Build a fleet from :class:`~sensorchrono.config.SessionConfig`, supporting
     N Shimmers, M cameras, and K microphones as configured by the operator."""
     from sensorchrono.devices.camera import CameraAdapter
+    from sensorchrono.devices.emotiv import EmotivAdapter
     from sensorchrono.devices.keyboard import KeyboardAdapter
     from sensorchrono.devices.microphone import MicrophoneAdapter
     from sensorchrono.devices.shimmer_exg import ShimmerExgAdapter
@@ -154,6 +155,13 @@ def build_real_fleet(session, *, shimmer_mode: str = "ecg") -> list[DeviceAdapte
     for idx, dev in enumerate(b.mic_devices):
         adapters.append(MicrophoneAdapter(device=(dev if dev is not None else None),
                                           fleet_idx=idx))
+
+    if getattr(b, "emotiv_enabled", False):
+        adapters.append(EmotivAdapter(
+            headset_id=getattr(b, "emotiv_headset_id", None),
+            credentials_file=getattr(b, "emotiv_credentials_file", None),
+            streams=getattr(b, "emotiv_streams", None) or ["eeg", "mot"],
+        ))
 
     adapters.append(KeyboardAdapter())
     return adapters

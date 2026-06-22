@@ -118,6 +118,7 @@ class LiveView(QtCore.QObject):
         self._t0 = time.monotonic()
         self._inlets: dict = {}          # stream_name → StreamInlet
         self._ecg_ch: dict = {}          # stream_name → int (best channel index)
+        self._eeg_filter_state: dict = {}  # stream_name → (SOS, filter state)
         self._video_frames: dict = {}    # stream_name → int (frames seen)
 
     def start(self) -> None:
@@ -142,15 +143,52 @@ class LiveView(QtCore.QObject):
             found = pylsl.resolve_byprop("name", name, 1, 0.5)
             if found:
                 self._inlets[name] = pylsl.StreamInlet(found[0], max_buflen=2)
+                if name == str(StreamName.EMOTIV_EEG):
+                    label = self._first_channel_label(found[0])
+                    for widget, kind in self._page.panels.get(name, []):
+                        if kind == "emotiv_eeg":
+                            widget.set_signal_name(
+                                f"{label} - BPF 1-50 Hz")
+
+    @staticmethod
+    def _first_channel_label(stream_info) -> str:
+        try:
+            channel = stream_info.desc().child("channels").child("channel")
+            return channel.child_value("label") or "Channel 1"
+        except Exception:
+            return "Channel 1"
 
     def _pick_ecg_channel(self, stream_name: str, samples) -> int:
         import numpy as np
-        stds = np.asarray(samples, dtype=float).std(axis=0)
+        arr = np.asarray(samples, dtype=float)
+        # col 0 is the Shimmer device timestamp — always skip it
+        signal = arr[:, 1:] if arr.shape[1] > 1 else arr
+        stds = signal.std(axis=0)
+        offset = 1 if arr.shape[1] > 1 else 0
         ch = self._ecg_ch.get(stream_name)
-        if ch is None or ch >= len(stds) or stds[ch] < 1e-6:
-            ch = int(np.argmax(stds))
+        if ch is None or (ch - offset) >= len(stds) or stds[ch - offset] < 1e-6:
+            ch = int(np.argmax(stds)) + offset
             self._ecg_ch[stream_name] = ch
         return ch
+
+    def _filter_emotiv_eeg(self, stream_name: str, samples):
+        """Apply a stateful 1-50 Hz display-only band-pass to one EEG channel."""
+        import numpy as np
+        from scipy.signal import butter, sosfilt
+
+        values = np.asarray(samples, dtype=float).ravel()
+        if values.size == 0:
+            return values
+        state = self._eeg_filter_state.get(stream_name)
+        if state is None:
+            sos = butter(4, (1.0, 50.0), btype="bandpass", fs=128.0,
+                         output="sos")
+            zi = np.zeros((sos.shape[0], 2), dtype=float)
+        else:
+            sos, zi = state
+        filtered, zi = sosfilt(sos, values, zi=zi)
+        self._eeg_filter_state[stream_name] = (sos, zi)
+        return filtered
 
     def _tick(self) -> None:
         if self._page.panels:
@@ -197,9 +235,13 @@ class LiveView(QtCore.QObject):
             if not samples:
                 continue
             for w, kind in panel_list:
-                if kind == "ecg":
-                    ch = self._pick_ecg_channel(sname, samples)
-                    w.append([row[ch] for row in samples])
+                if kind in ("ecg", "emotiv_eeg"):
+                    ch = (0 if kind == "emotiv_eeg"
+                          else self._pick_ecg_channel(sname, samples))
+                    values = [row[ch] for row in samples]
+                    if kind == "emotiv_eeg":
+                        values = self._filter_emotiv_eeg(sname, values)
+                    w.append(values)
                 elif kind == "audio_level":
                     rms = float(np.sqrt(np.mean(np.square(
                         np.asarray(samples, dtype=float)))))

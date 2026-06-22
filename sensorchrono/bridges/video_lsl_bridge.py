@@ -117,6 +117,49 @@ def _write_preview_jpeg(path, frame):
         pass
 
 
+def _playback_rate_mismatch(nominal_fps: float, effective_fps: float) -> bool:
+    if nominal_fps <= 0 or effective_fps <= 0:
+        return False
+    return abs(effective_fps / nominal_fps - 1.0) > 0.05
+
+
+def _retime_video(path: Path, effective_fps: float) -> bool:
+    """Rewrite a constant-rate MP4 header/stream to match measured capture time."""
+    import os
+
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return False
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    temp = path.with_name(f"{path.stem}.retimed.mp4")
+    out = cv2.VideoWriter(
+        str(temp), cv2.VideoWriter_fourcc(*"mp4v"),
+        float(effective_fps), (width, height),
+    )
+    if not out.isOpened():
+        cap.release()
+        return False
+
+    frames = 0
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            out.write(frame)
+            frames += 1
+    finally:
+        cap.release()
+        out.release()
+
+    if frames == 0:
+        temp.unlink(missing_ok=True)
+        return False
+    os.replace(temp, path)
+    return True
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=int, default=DEFAULTS["device"])
@@ -238,6 +281,11 @@ def main(argv=None):
         cap.release()
         writer.release()
         csv_f.close()
+        if (_playback_rate_mismatch(float(args.fps), eff_fps)
+                and _retime_video(mp4_path, eff_fps)):
+            print(
+                f"[video] corrected MP4 playback rate "
+                f"{args.fps:.2f} -> {eff_fps:.2f} fps")
         if args.preview:
             cv2.destroyAllWindows()
         if stop_file is not None:

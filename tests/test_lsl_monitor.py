@@ -81,3 +81,24 @@ def test_monitor_resolves_real_simulated_stream(tmp_path):
     finally:
         mon.stop()
         a.stop()
+def test_low_but_continuous_video_rate_warns_without_blocking():
+    from sensorchrono.contract import STREAM_SPECS, StreamName
+
+    result = compute_stream_liveness(
+        STREAM_SPECS[StreamName.VIDEO_FRAMES],
+        present=True, n_samples=3, window_s=0.5,
+        max_gap_s=0.2, measured_channels=2,
+    )
+    assert result.ok
+    assert "low camera rate" in result.note
+
+
+def test_stalled_video_still_blocks():
+    from sensorchrono.contract import STREAM_SPECS, StreamName
+
+    result = compute_stream_liveness(
+        STREAM_SPECS[StreamName.VIDEO_FRAMES],
+        present=True, n_samples=0, window_s=0.5,
+        max_gap_s=1.0, measured_channels=2,
+    )
+    assert not result.ok

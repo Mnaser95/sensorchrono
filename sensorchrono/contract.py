@@ -34,6 +34,8 @@ class StreamName(StrEnum):
     SHIMMER_MARKERS = "ShimmerMarkers"
     SHIMMER_DIAGNOSTICS_ECG = "ShimmerDiagnostics_ECG"
     SHIMMER_ACCEL = "ShimmerAccel"  # future (accel adapter); plugin seam ready
+    EMOTIV_EEG = "EmotivEEG"
+    EMOTIV_MOTION = "EmotivMotion"
     AUDIO = "Audio"
     VIDEO_FRAMES = "VideoFrames"
     KEYBOARD_FIDUCIAL = "KeyboardFiducial"
@@ -63,6 +65,10 @@ STREAM_SPECS: dict[StreamName, StreamSpec] = {
         StreamName.SHIMMER_DIAGNOSTICS_ECG, "Diagnostics", 5, 1.0
     ),
     StreamName.SHIMMER_ACCEL: StreamSpec(StreamName.SHIMMER_ACCEL, "Accel", 3, 256.0),
+    # Cortex discovers channel layouts at subscription time. channels=0 means
+    # "dynamic" to the liveness monitor, not a zero-channel LSL outlet.
+    StreamName.EMOTIV_EEG: StreamSpec(StreamName.EMOTIV_EEG, "EEG", 0, 128.0),
+    StreamName.EMOTIV_MOTION: StreamSpec(StreamName.EMOTIV_MOTION, "Motion", 0, 0.0),
     StreamName.AUDIO: StreamSpec(StreamName.AUDIO, "Audio", 1, 48000.0),
     # VideoFrames carries [frame_idx, cap_pos_ms] -> 2 channels, matching
     # video_lsl_bridge.py (channel_count=2) and profiles/logitech_brio.yaml.
@@ -77,6 +83,8 @@ ANALYSIS_CONSUMED: frozenset[StreamName] = frozenset(
     {
         StreamName.SHIMMER_ECG,
         StreamName.SHIMMER_DIAGNOSTICS_ECG,
+        StreamName.EMOTIV_EEG,
+        StreamName.EMOTIV_MOTION,
         StreamName.AUDIO,
         StreamName.VIDEO_FRAMES,
         StreamName.KEYBOARD_FIDUCIAL,

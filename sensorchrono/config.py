@@ -90,6 +90,10 @@ class DeviceBindings:
     shimmer_com_ports: list = field(default_factory=list)   # list[str]  — COM ports
     camera_indices: list = field(default_factory=list)      # list[int]  — cv2 device indices
     mic_devices: list = field(default_factory=list)         # list[str | int] — sounddevice ids
+    emotiv_enabled: bool = False
+    emotiv_headset_id: str | None = None
+    emotiv_credentials_file: str | None = None
+    emotiv_streams: list = field(default_factory=lambda: ["eeg", "mot"])
     display_grid: list = field(default_factory=list)        # list[list[str]] — 2-D panel layout
 
 
@@ -168,6 +172,19 @@ class SessionConfig:
                 errs.append("real capture requires at least one Shimmer COM port")
             if not self.bindings.camera_indices:
                 errs.append("real capture requires at least one camera")
+            if self.bindings.emotiv_enabled:
+                cred = self.bindings.emotiv_credentials_file
+                has_env = bool(
+                    os.environ.get("EMOTIV_CLIENT_ID")
+                    and os.environ.get("EMOTIV_CLIENT_SECRET")
+                )
+                if cred and not Path(cred).expanduser().is_file():
+                    errs.append(f"EMOTIV credentials file not found: {cred}")
+                elif not cred and not has_env:
+                    errs.append(
+                        "EMOTIV requires a credentials file or the "
+                        "EMOTIV_CLIENT_ID/EMOTIV_CLIENT_SECRET environment variables"
+                    )
 
         if errs:
             raise ConfigError("Invalid session config:\n  - " + "\n  - ".join(errs))

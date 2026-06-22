@@ -9,6 +9,7 @@ pyyaml            # profiles/*.yaml + sensorchrono config.yaml
 sounddevice       # audio_lsl_bridge mic capture
 pynput            # keyboard_fiducial_bridge global HID hook
 opencv-python     # video_lsl_bridge camera capture (imported as cv2)
+imageio-ffmpeg    # bundled FFmpeg for adding mic audio to validation MP4
 websockets        # emotiv/cortex bridge
 
 # --- sensorchrono desktop app (GUI, Phase 3) ---

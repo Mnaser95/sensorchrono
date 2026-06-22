@@ -23,6 +23,9 @@ from sensorchrono.devices.base import LivenessReport, StreamLiveness
 RATE_OK_FRACTION = 0.6
 #: largest tolerated gap (s) between consecutive samples on a regular stream
 GAP_LIMIT_S = 0.5
+#: VideoFrames timestamps remain valid below the requested camera FPS. Require
+#: forward progress, but report a warning rather than blocking on throughput.
+MIN_VIDEO_RATE_HZ = 1.0
 
 
 def compute_stream_liveness(
@@ -52,7 +55,10 @@ def compute_stream_liveness(
         )
 
     problems: list[str] = []
-    if measured_channels and measured_channels != spec.channels:
+    notices: list[str] = []
+    # expected channels=0 declares a dynamic layout (different EMOTIV models
+    # expose different channel sets through Cortex).
+    if spec.channels > 0 and measured_channels and measured_channels != spec.channels:
         problems.append(f"channels {measured_channels}!={spec.channels}")
     if not is_marker:
         # Rate-aware tolerances. The monitor polls in a short (~0.5 s) window, so
@@ -65,8 +71,18 @@ def compute_stream_liveness(
         # long enough to actually observe the nominal rate (≥ ~2 expected samples).
         period = 1.0 / expected_rate
         gap_limit = max(GAP_LIMIT_S, 3.0 * period)
-        if window_s * expected_rate >= 2.0 and measured_rate < RATE_OK_FRACTION * expected_rate:
-            problems.append(f"rate {measured_rate:.1f}<{RATE_OK_FRACTION:.0%} of {expected_rate:.0f}Hz")
+        rate_floor = RATE_OK_FRACTION * expected_rate
+        if spec.name == StreamName.VIDEO_FRAMES:
+            if measured_rate < MIN_VIDEO_RATE_HZ:
+                problems.append(
+                    f"camera rate {measured_rate:.1f}<{MIN_VIDEO_RATE_HZ:.0f}Hz")
+            elif measured_rate < rate_floor:
+                notices.append(
+                    f"low camera rate {measured_rate:.1f}/{expected_rate:.0f}Hz")
+        elif window_s * expected_rate >= 2.0 and measured_rate < rate_floor:
+            problems.append(
+                f"rate {measured_rate:.1f}<{RATE_OK_FRACTION:.0%} "
+                f"of {expected_rate:.0f}Hz")
         if max_gap_s > gap_limit:
             problems.append(f"gap {max_gap_s*1000:.0f}ms>{gap_limit*1000:.0f}ms")
 
@@ -79,7 +95,7 @@ def compute_stream_liveness(
         ok=not problems,
         measured_channels=measured_channels,
         expected_channels=spec.channels,
-        note="; ".join(problems),
+        note="; ".join([*problems, *notices]),
     )
 
 

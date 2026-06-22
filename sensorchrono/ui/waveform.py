@@ -12,9 +12,11 @@ from PySide6 import QtWidgets
 
 
 class WaveformWidget(pg.PlotWidget):
-    """Fixed-length ring buffer plotted as a scrolling ECG trace."""
+    """Fixed-length ring buffer plotted as a scrolling signal trace."""
 
-    def __init__(self, *, buffer_n: int = 2560, y_range: tuple[float, float] = (-1.5, 1.5), parent=None) -> None:
+    def __init__(self, *, buffer_n: int = 2560,
+                 y_range: tuple[float, float] = (-1.5, 1.5),
+                 y_label: str = "ECG (mV)", parent=None) -> None:
         super().__init__(parent)
         self.buffer_n = buffer_n
         self._buf = np.zeros(buffer_n, dtype=float)
@@ -26,8 +28,11 @@ class WaveformWidget(pg.PlotWidget):
         plot.setDownsampling(auto=True)
         plot.setClipToView(True)
         plot.setMenuEnabled(False)
-        self.setLabel("left", "ECG (mV)")
+        self.setLabel("left", y_label)
         self.hideAxis("bottom")
+
+    def set_signal_name(self, name: str) -> None:
+        self.setTitle(str(name))
 
     def append(self, samples) -> None:
         s = np.asarray(samples, dtype=float).ravel()

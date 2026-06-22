@@ -59,6 +59,31 @@ electrode placement, packet/timing reference).
 
 ---
 
+### Optional EMOTIV headset
+
+SensorChrono can launch an EMOTIV Cortex bridge alongside the Shimmer,
+camera, microphone, and keyboard bridges:
+
+1. Install and start **EMOTIV Launcher**, then connect the headset.
+2. Register a Cortex application in the EMOTIV developer portal.
+3. Create a text file containing:
+
+   ```text
+   CLIENT_ID=your_client_id
+   CLIENT_SECRET=your_client_secret
+   ```
+
+4. On **Set up recording**, enable **EMOTIV Cortex**, optionally enter the
+   headset ID, and select that credentials file. Environment variables
+   `EMOTIV_CLIENT_ID` and `EMOTIV_CLIENT_SECRET` can be used instead.
+5. Accept the Cortex access request in EMOTIV Launcher on first use.
+
+The bridge publishes `EmotivEEG` and `EmotivMotion`; Cortex determines the
+actual channel layout, so Insight and other Cortex-supported models are not
+hard-coded. EMOTIV samples use the local LSL clock at WebSocket receipt time.
+SensorChrono exports them but does not claim Shimmer-style device-clock or
+acquisition-lag correction for these streams.
+
 ## Run from source (developers)
 
 SensorChrono is a normal Python package. The GUI and live bridges need real
@@ -126,6 +151,7 @@ also runs standalone: `analysis.recording_audit`, `analysis.shimmer_clock_model`
 
 | Modality | Device | LSL stream(s) |
 |---|---|---|
+| EEG / motion | EMOTIV Cortex-supported headset | `EmotivEEG`, `EmotivMotion` |
 | ECG / EMG | Shimmer3 EXG (Bluetooth) | `ShimmerECG` / `ShimmerEMG`, `ShimmerMarkers`, `ShimmerDiagnostics_ECG` |
 | Video | Any UVC webcam (operator-selected index) | `VideoFrames` (+ `.mp4` + `frames.csv`) |
 | Audio | Any input device (operator-selected, or system default) | `Audio` (48 kHz) |

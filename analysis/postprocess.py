@@ -27,6 +27,7 @@ CLI
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from dataclasses import dataclass, asdict, field
@@ -221,14 +222,15 @@ def run(xdf_path: Path, *,
 
     # --- Stage 6: sync validation video
     try:
-        from analysis.sync_validation import generate_validation_video as _gen_video
-        vid_path = _gen_video(by_name, ecg_corrected_ts, lag_ms, out_dir)
-        if vid_path:
+        from analysis.sync_validation import generate_validation_videos
+        video_paths = generate_validation_videos(
+            by_name, ecg_corrected_ts, lag_ms, out_dir)
+        if video_paths:
             stages.append(StageResult(
                 name="6_sync_validation",
                 status="ok",
-                detail=f"wrote {vid_path.name}",
-                artifacts=[str(vid_path)],
+                detail="wrote " + ", ".join(p.name for p in video_paths),
+                artifacts=[str(path) for path in video_paths],
             ))
         else:
             stages.append(StageResult(
@@ -342,6 +344,27 @@ def _write_unified_outputs(out_dir: Path,
             for t, e in zip(ts, ev):
                 e_safe = str(e).replace("\"", "\\\"")
                 f.write(f"{t:.6f},\"{e_safe}\"\n")
+        artifacts.append(out_path)
+
+    # EMOTIV Cortex streams retain their recorded LSL receipt timestamps. They
+    # are exported, but no device-clock or acquisition-lag correction is
+    # claimed because Cortex does not expose the headset sample clock here.
+    for stream_name, filename in (
+        ("EmotivEEG", "emotiv_eeg.csv"),
+        ("EmotivMotion", "emotiv_motion.csv"),
+    ):
+        if stream_name not in by_name:
+            continue
+        stream = by_name[stream_name]
+        stamps = np.asarray(stream["time_stamps"])
+        values = np.asarray(stream["time_series"])
+        if values.ndim == 1:
+            values = values[:, None]
+        out_path = out_dir / filename
+        with open(out_path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["lsl_receipt_s", *[f"ch_{i}" for i in range(values.shape[1])]])
+            writer.writerows([float(t), *row.tolist()] for t, row in zip(stamps, values))
         artifacts.append(out_path)
 
     return artifacts

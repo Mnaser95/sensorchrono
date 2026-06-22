@@ -131,3 +131,9 @@ def test_session_real_mode_builds_real_fleet(tmp_path):
     s = _session(tmp_path, bindings=DeviceBindings(shimmer_com_ports=["COM3"], camera_indices=[0]))
     c = SessionController(s)
     assert {a.name for a in c._fleet()} == {"shimmer_exg_0", "camera_0", "mic_0", "keyboard"}
+def test_video_playback_rate_mismatch_detection():
+    from sensorchrono.bridges.video_lsl_bridge import _playback_rate_mismatch
+
+    assert _playback_rate_mismatch(30.0, 5.0)
+    assert not _playback_rate_mismatch(30.0, 29.0)
+    assert not _playback_rate_mismatch(30.0, 0.0)

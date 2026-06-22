@@ -193,6 +193,54 @@ def test_liveview_plots_varying_ecg_channel_not_constant_ch0(app):
     assert lv._pick_ecg_channel("ShimmerECG", samples) == 2
 
 
+def test_liveview_emotiv_eeg_always_uses_first_channel(app):
+    from sensorchrono.ui.main_window import LiveView
+    from sensorchrono.ui.pages import LivenessPage
+
+    class _Widget:
+        def __init__(self):
+            self.values = None
+
+        def append(self, values):
+            self.values = np.asarray(values)
+
+    class _Inlet:
+        def pull_chunk(self, **_kwargs):
+            return [[1.0, 100.0], [2.0, 200.0], [3.0, 300.0]], []
+
+    lv = LiveView(LivenessPage(), dry_run=False)
+    widget = _Widget()
+    lv._page.panels = {"EmotivEEG": [(widget, "emotiv_eeg")]}
+    lv._inlets = {"EmotivEEG": _Inlet()}
+    lv._filter_emotiv_eeg = lambda _name, values: np.asarray(values)
+    lv._tick_configured()
+    assert np.array_equal(widget.values, [1.0, 2.0, 3.0])
+
+
+def test_liveview_emotiv_eeg_display_filter_passes_10hz_rejects_dc(app):
+    from sensorchrono.ui.main_window import LiveView
+    from sensorchrono.ui.pages import LivenessPage
+
+    lv = LiveView(LivenessPage(), dry_run=False)
+    t = np.arange(1280) / 128.0
+    raw = 50.0 + 20.0 * np.sin(2 * np.pi * 10.0 * t)
+    filtered = lv._filter_emotiv_eeg("EmotivEEG", raw)
+    tail = filtered[256:]
+    assert abs(np.mean(tail)) < 0.1
+    assert np.std(tail) > 10.0
+
+
+def test_emotiv_panel_has_eeg_label(app):
+    from sensorchrono.ui.pages import LivenessPage
+
+    page = LivenessPage()
+    page.configure([["emotiv_eeg:0"]])
+    waveform, kind = page.panels["EmotivEEG"][0]
+    assert kind == "emotiv_eeg"
+    assert "EEG" in waveform.getPlotItem().getAxis("left").labelText
+    assert "Channel 1" in waveform.getPlotItem().titleLabel.text
+
+
 def test_widgets_render_without_error(app):
     wf = WaveformWidget(buffer_n=256)
     wf.append(np.sin(np.linspace(0, 10, 500)))  # more than the buffer

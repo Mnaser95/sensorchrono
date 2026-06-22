@@ -216,6 +216,19 @@ def check_microphone(device: str | int | None) -> CheckResult:
         return CheckResult("microphone", FAIL, f"input device {device!r} not found: {exc}")
 
 
+
+def check_emotiv_launcher(
+    host: str = "localhost", port: int = 6868, timeout: float = 1.0,
+) -> CheckResult:
+    """Confirm EMOTIV Launcher's local Cortex WebSocket listener is running."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return CheckResult(
+                "emotiv_cortex", PASS, f"Cortex reachable at {host}:{port}")
+    except OSError as exc:
+        return CheckResult(
+            "emotiv_cortex", FAIL,
+            f"EMOTIV Launcher/Cortex not reachable at {host}:{port}: {exc}")
 def _log_report(report: PreflightReport) -> None:
     """Persist every CheckResult so a field log records exactly what preflight
     found (which device passed, which blocked, and the forensic detail)."""
@@ -246,5 +259,8 @@ def check_all(session, *, rcs_host: str = DEFAULT_RCS_HOST, rcs_port: int = DEFA
                 check_labrecorder(rcs_host, rcs_port, dry_run=False),
             ]
         )
+    if not dry_run and getattr(b, "emotiv_enabled", False):
+        report.checks.insert(-1, check_emotiv_launcher())
     _log_report(report)
+
     return report

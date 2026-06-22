@@ -258,3 +258,31 @@ def test_shutdown_tears_down_without_changing_state(tmp_path):
     c.shutdown()  # GUI window-close path: tear down but DON'T go to ERROR
     assert adapter.stopped and mon.stopped
     assert c.state == SessionState.LIVENESS
+
+
+
+def test_phase_boundaries_are_written_on_fsm_transitions(tmp_path, monkeypatch):
+    import json
+    import sensorchrono.orchestration.session as session_mod
+
+    times = iter([100.0, 110.0, 140.0])
+    monkeypatch.setattr(session_mod, "_lsl_now", lambda: next(times))
+    c = SessionController(
+        _session(tmp_path), adapters=default_simulated_fleet(),
+        postprocess_fn=lambda _xdf, _mp4: None,
+    )
+    c.run_preflight()
+    c.start_staging()
+    c.start_calibration()
+    for t in range(12):
+        c.note_fiducial(float(t))
+    c.to_recording()
+    c.end_capture()
+
+    boundaries = json.loads(
+        (c.session.out_dir / "phase_boundaries.json").read_text())
+    assert boundaries == {
+        "calibration_start_lsl": 100.0,
+        "experiment_start_lsl": 110.0,
+        "experiment_end_lsl": 140.0,
+    }
